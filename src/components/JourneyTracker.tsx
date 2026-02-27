@@ -10,6 +10,7 @@ import {
 import { useAuthSession } from "@/contexts/AuthContext";
 import { getJourney, updateJourneyAny } from "@/features/journey/api";
 import { readFamilyJourneySharePayload } from "@/lib/journey-share-client";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Department {
   id: string;
@@ -147,6 +148,7 @@ export function JourneyTracker({
   compact = false
 }: JourneyTrackerProps) {
   const { data: session } = useAuthSession();
+  const { tx } = useLanguage();
   const [journey, setJourney] = useState<Journey | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -501,7 +503,7 @@ export function JourneyTracker({
                         </h4>
                         {isCurrent && (
                           <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
-                            Current
+                            {tx("Current")}
                           </span>
                         )}
                       </div>
@@ -512,13 +514,13 @@ export function JourneyTracker({
                       {/* Notes & Orders */}
                       {checkpoint.notes && (
                         <div className="mt-2 text-sm text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 p-2 rounded-lg border border-neutral-200 dark:border-neutral-700">
-                          <span className="font-semibold block mb-1">Doctor Notes:</span>
+                          <span className="font-semibold block mb-1">{tx("Doctor Notes:")}</span>
                           {checkpoint.notes}
                         </div>
                       )}
                       {checkpoint.orders && checkpoint.orders.length > 0 && (
                         <div className="mt-2 text-sm text-neutral-700 dark:text-neutral-300 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800/30">
-                          <span className="font-semibold block mb-1">Test Orders:</span>
+                          <span className="font-semibold block mb-1">{tx("Test Orders:")}</span>
                           <ul className="space-y-1">
                             {checkpoint.orders.map((o: any) => (
                               <li key={o.orderId} className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-neutral-800 p-1.5 rounded border border-neutral-100 dark:border-neutral-700">
@@ -535,7 +537,7 @@ export function JourneyTracker({
                                     onClick={() => markOrderDone(checkpoint.id, o.orderId)}
                                     className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition"
                                   >
-                                    Mark Done
+                                    {tx("Mark Done")}
                                   </button>
                                 )}
                               </li>
@@ -548,13 +550,13 @@ export function JourneyTracker({
                       {checkpoint.status !== 'pending' && (
                         <div className="flex items-center gap-4 mt-1 text-xs text-neutral-500">
                           {checkpoint.arrivedAt && (
-                            <span>Arrived: {new Date(checkpoint.arrivedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>{tx("Arrived:")} {new Date(checkpoint.arrivedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                           )}
                           {checkpoint.actualWaitMinutes !== undefined && (
-                            <span>Waited: {checkpoint.actualWaitMinutes}m</span>
+                            <span>{tx("Waited:")} {checkpoint.actualWaitMinutes}m</span>
                           )}
                           {checkpoint.completedAt && (
-                            <span>Completed: {new Date(checkpoint.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>{tx("Completed:")} {new Date(checkpoint.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                           )}
                         </div>
                       )}

@@ -133,7 +133,7 @@ export default function HospitalAdminPage() {
 
   const handleRefresh = async () => {
     if (!selectedHospital) return;
-    
+
     setRefreshing(true);
     await Promise.all([
       fetchHospitals(),
@@ -354,7 +354,12 @@ export default function HospitalAdminPage() {
               </div>
               <div className="divide-y divide-neutral-200 dark:divide-neutral-700">
                 {selectedHospital.departments.map((dept) => {
-                  const utilization = (dept.currentQueue / dept.maxCapacity) * 100;
+                  // Dynamically calculate current queue size for this department based on active journeys
+                  const dynamicQueue = activeJourneys.filter(
+                    (j) => j.status !== "completed" && j.currentCheckpoint?.department?.name === dept.name
+                  ).length;
+
+                  const utilization = dept.maxCapacity > 0 ? (dynamicQueue / dept.maxCapacity) * 100 : 0;
                   const status = utilization < 50 ? 'low' : utilization < 80 ? 'medium' : 'high';
                   const statusColor = {
                     low: 'text-green-600 bg-green-50 dark:bg-green-900/30',
@@ -375,13 +380,13 @@ export default function HospitalAdminPage() {
                             </span>
                           </div>
                           <div className="flex items-center gap-4 text-sm text-neutral-600 dark:text-neutral-400">
-                            <span>Queue: {dept.currentQueue}/{dept.maxCapacity}</span>
+                            <span>Queue: {dynamicQueue}/{dept.maxCapacity}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="w-32">
                             <div className="h-2 bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 className={`h-full ${status === 'low' ? 'bg-green-500' : status === 'medium' ? 'bg-yellow-500' : 'bg-red-500'}`}
                                 style={{ width: `${Math.min(utilization, 100)}%` }}
                               />
@@ -445,7 +450,7 @@ export default function HospitalAdminPage() {
                               {journey.progressPercent}%
                             </div>
                             <div className="w-24 h-2 bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden mt-1">
-                              <div 
+                              <div
                                 className="h-full bg-blue-500 rounded-full"
                                 style={{ width: `${journey.progressPercent}%` }}
                               />

@@ -15,9 +15,7 @@ interface IVerifier {
  * @notice Minimal interface for guardian veto: HealthRegistry checks if caller is a guardian of the patient.
  */
 interface IIdentityRegistry {
-    function getGuardians(
-        address patient
-    ) external view returns (address[] memory);
+    function getGuardians(address patient) external view returns (address[] memory);
 }
 
 /**
@@ -54,10 +52,10 @@ contract HealthRegistry {
 
     // Records: only metadata on-chain — no file content, no DEKs
     struct Record {
-        string fileCid; // IPFS CID of AES-256-GCM encrypted file
+        string fileCid;      // IPFS CID of AES-256-GCM encrypted file
         address patient;
         address uploader;
-        bytes32 fileType; // "xray"|"blood-report"|"prescription"|"diagnosis"|"self-upload"
+        bytes32 fileType;    // "xray"|"blood-report"|"prescription"|"diagnosis"|"self-upload"
         uint256 timestamp;
         bool active;
     }
@@ -71,21 +69,20 @@ contract HealthRegistry {
     // ─── Unconscious Protocol (Tier 2) with Timelock ──────────────────────────
     struct UnconsciousRequest {
         address hospital;
-        uint256 requestTime; // when 2nd signature was given
+        uint256 requestTime;    // when 2nd signature was given
         uint8 signCount;
-        bool executed; // timelock passed, access opened
-        bool vetoed; // family vetoed, request cancelled
+        bool executed;          // timelock passed, access opened
+        bool vetoed;            // family vetoed, request cancelled
     }
     mapping(address => UnconsciousRequest) public unconsciousRequests;
     // Co-signers: patient → hospital → signer → signed
-    mapping(address => mapping(address => mapping(address => bool)))
-        public coSigned;
+    mapping(address => mapping(address => mapping(address => bool))) public coSigned;
     // Active access after timelock: patient → hospital → expiry timestamp
     mapping(address => mapping(address => uint256)) public unconsciousAccess;
 
-    uint256 public constant TIMELOCK_WINDOW = 30 minutes;
-    uint256 public constant ACCESS_DURATION = 72 hours;
-    uint8 public constant SIGN_THRESHOLD = 2;
+    uint256 public constant TIMELOCK_WINDOW  = 30 minutes;
+    uint256 public constant ACCESS_DURATION  = 72 hours;
+    uint8   public constant SIGN_THRESHOLD   = 2;
 
     // Access request tracking
     mapping(address => mapping(address => bool)) public accessRequested;
@@ -105,65 +102,29 @@ contract HealthRegistry {
 
     // encDekForGrantee: AES-256-GCM(DEK, grantee_publicKey)
     // Grantee fetches this from the event + IPFS — NOT stored in contract state
-    event AccessGranted(
-        bytes32 indexed recordId,
-        address indexed grantee,
-        string encDekIpfsCid
-    );
+    event AccessGranted(bytes32 indexed recordId, address indexed grantee, string encDekIpfsCid);
     event AccessRevoked(bytes32 indexed recordId, address indexed grantee);
     event AccessManifestUpdated(address indexed patient, string newManifestCid);
     event AccessRequested(address indexed patient, address indexed clinician);
 
-    event EmergencyRecordAdded(
-        address indexed patient,
-        bytes32 indexed recordId
-    );
-    event EmergencyRecordRemoved(
-        address indexed patient,
-        bytes32 indexed recordId
-    );
+    event EmergencyRecordAdded(address indexed patient, bytes32 indexed recordId);
+    event EmergencyRecordRemoved(address indexed patient, bytes32 indexed recordId);
 
     // Tier 1 Break-Glass: verified doctor logs emergency access
-    event BreakGlassUsed(
-        address indexed patient,
-        address indexed doctor,
-        uint256 timestamp
-    );
+    event BreakGlassUsed(address indexed patient, address indexed doctor, uint256 timestamp);
 
     // Tier 2 Unconscious Protocol with timelock
-    event UnconsciousCoSigned(
-        address indexed patient,
-        address indexed hospital,
-        address indexed signer,
-        uint8 count
-    );
-    event UnconsciousTimelockStarted(
-        address indexed patient,
-        address indexed hospital,
-        uint256 vetoDeadline
-    );
-    event UnconsciousAccessGranted(
-        address indexed patient,
-        address indexed hospital,
-        uint256 expiry
-    );
+    event UnconsciousCoSigned(address indexed patient, address indexed hospital, address indexed signer, uint8 count);
+    event UnconsciousTimelockStarted(address indexed patient, address indexed hospital, uint256 vetoDeadline);
+    event UnconsciousAccessGranted(address indexed patient, address indexed hospital, uint256 expiry);
     event UnconsciousVetoed(address indexed patient, address by);
-    event UnconsciousAccessRevoked(
-        address indexed patient,
-        address indexed hospital
-    );
+    event UnconsciousAccessRevoked(address indexed patient, address indexed hospital);
     event VerifierUpdated(address indexed newVerifier);
     event IdentityRegistryUpdated(address indexed newIdentityRegistry);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
-    }
-    modifier onlyPatient() {
-        require(patients[msg.sender], "Not a patient");
-        _;
-    }
+    modifier onlyOwner() { require(msg.sender == owner, "Not owner"); _; }
+    modifier onlyPatient() { require(patients[msg.sender], "Not a patient"); _; }
     modifier onlyVerifiedClinician() {
         require(verifier.isVerified(msg.sender), "Not a verified clinician");
         _;
@@ -220,9 +181,7 @@ contract HealthRegistry {
             "Not authorised"
         );
 
-        recordId = keccak256(
-            abi.encodePacked(patient, fileCid, block.timestamp, msg.sender)
-        );
+        recordId = keccak256(abi.encodePacked(patient, fileCid, block.timestamp, msg.sender));
 
         records[recordId] = Record({
             fileCid: fileCid,
@@ -234,19 +193,10 @@ contract HealthRegistry {
         });
 
         patientRecords[patient].push(recordId);
-        emit RecordAdded(
-            recordId,
-            patient,
-            msg.sender,
-            fileCid,
-            fileType,
-            block.timestamp
-        );
+        emit RecordAdded(recordId, patient, msg.sender, fileCid, fileType, block.timestamp);
     }
 
-    function deactivateRecord(
-        bytes32 recordId
-    ) external onlyRecordPatient(recordId) {
+    function deactivateRecord(bytes32 recordId) external onlyRecordPatient(recordId) {
         records[recordId].active = false;
         emit RecordDeactivated(recordId, msg.sender);
     }
@@ -312,15 +262,13 @@ contract HealthRegistry {
         require(records[recordId].patient == patient, "Patient mismatch");
         require(records[recordId].uploader == msg.sender, "Not the uploader");
         require(
-            grantee == patient ||
-                grantee == msg.sender ||
-                verifier.isVerified(grantee),
+            grantee == patient || grantee == msg.sender || verifier.isVerified(grantee),
             "Grantee not a verified clinician"
         );
 
         // Update the patient's manifest CID
         accessManifestCid[patient] = newManifestCid;
-
+        
         emit AccessGranted(recordId, grantee, encDekIpfsCid);
         emit AccessManifestUpdated(patient, newManifestCid);
     }
@@ -334,19 +282,14 @@ contract HealthRegistry {
 
     // ─── Emergency Tier 1 — Break-Glass ───────────────────────────────────────
 
-    function addToEmergencyRecords(
-        bytes32 recordId
-    ) external onlyRecordPatient(recordId) {
+    function addToEmergencyRecords(bytes32 recordId) external onlyRecordPatient(recordId) {
         require(!isEmergencyRecord[msg.sender][recordId], "Already added");
         isEmergencyRecord[msg.sender][recordId] = true;
         emergencyRecords[msg.sender].push(recordId);
         emit EmergencyRecordAdded(msg.sender, recordId);
     }
 
-    function removeFromEmergencyRecords(
-        bytes32 recordId,
-        uint256 index
-    ) external onlyRecordPatient(recordId) {
+    function removeFromEmergencyRecords(bytes32 recordId, uint256 index) external onlyRecordPatient(recordId) {
         bytes32[] storage arr = emergencyRecords[msg.sender];
         require(index < arr.length && arr[index] == recordId, "Bad index");
         arr[index] = arr[arr.length - 1];
@@ -369,9 +312,7 @@ contract HealthRegistry {
      *         After SIGN_THRESHOLD signatures: 30-minute veto window opens.
      *         ICE contact must be auto-notified off-chain by the server immediately.
      */
-    function signUnconsciousProtocol(
-        address patient
-    ) external onlyVerifiedClinician {
+    function signUnconsciousProtocol(address patient) external onlyVerifiedClinician {
         address hospital = msg.sender;
         UnconsciousRequest storage req = unconsciousRequests[patient];
 
@@ -393,11 +334,7 @@ contract HealthRegistry {
 
         if (req.signCount >= SIGN_THRESHOLD && !req.executed && !req.vetoed) {
             req.requestTime = block.timestamp;
-            emit UnconsciousTimelockStarted(
-                patient,
-                hospital,
-                block.timestamp + TIMELOCK_WINDOW
-            );
+            emit UnconsciousTimelockStarted(patient, hospital, block.timestamp + TIMELOCK_WINDOW);
             // Server: trigger SMS/WhatsApp to patient's ICE contact NOW
         }
     }
@@ -411,10 +348,7 @@ contract HealthRegistry {
         require(req.signCount >= SIGN_THRESHOLD, "Not enough signatures");
         require(!req.vetoed, "Request was vetoed");
         require(!req.executed, "Already executed");
-        require(
-            block.timestamp >= req.requestTime + TIMELOCK_WINDOW,
-            "Timelock active"
-        );
+        require(block.timestamp >= req.requestTime + TIMELOCK_WINDOW, "Timelock active");
 
         req.executed = true;
         uint256 expiry = block.timestamp + ACCESS_DURATION;
@@ -427,17 +361,13 @@ contract HealthRegistry {
      */
     function vetoUnconsciousProtocol(address patient) external {
         require(
-            msg.sender == patient ||
-                _isRegisteredGuardianOf(patient, msg.sender),
+            msg.sender == patient || _isRegisteredGuardianOf(patient, msg.sender),
             "Not authorised to veto"
         );
         UnconsciousRequest storage req = unconsciousRequests[patient];
         require(req.signCount >= SIGN_THRESHOLD, "No active request");
         require(!req.executed, "Already executed");
-        require(
-            block.timestamp < req.requestTime + TIMELOCK_WINDOW,
-            "Veto window closed"
-        );
+        require(block.timestamp < req.requestTime + TIMELOCK_WINDOW, "Veto window closed");
 
         req.vetoed = true;
         emit UnconsciousVetoed(patient, msg.sender);
@@ -449,10 +379,7 @@ contract HealthRegistry {
         emit UnconsciousAccessRevoked(msg.sender, hospital);
     }
 
-    function hasUnconsciousAccess(
-        address patient,
-        address hospital
-    ) external view returns (bool) {
+    function hasUnconsciousAccess(address patient, address hospital) external view returns (bool) {
         return unconsciousAccess[patient][hospital] > block.timestamp;
     }
 
@@ -463,24 +390,18 @@ contract HealthRegistry {
      *         Client re-encrypts all files with new key, re-pins, and updates the manifest CID.
      *         All existing AccessGranted events become stale — doctor re-grant flow required.
      */
-    function rotateEncryptionKey(
-        string calldata newManifestCid
-    ) external onlyPatient {
+    function rotateEncryptionKey(string calldata newManifestCid) external onlyPatient {
         accessManifestCid[msg.sender] = newManifestCid;
         emit AccessManifestUpdated(msg.sender, newManifestCid);
     }
 
     // ─── View ─────────────────────────────────────────────────────────────────
 
-    function getPatientRecords(
-        address patient
-    ) external view returns (bytes32[] memory) {
+    function getPatientRecords(address patient) external view returns (bytes32[] memory) {
         return patientRecords[patient];
     }
 
-    function getEmergencyRecords(
-        address patient
-    ) external view returns (bytes32[] memory) {
+    function getEmergencyRecords(address patient) external view returns (bytes32[] memory) {
         return emergencyRecords[patient];
     }
 
@@ -491,14 +412,9 @@ contract HealthRegistry {
     // ─── Internal ─────────────────────────────────────────────────────────────
 
     /// @notice Returns true if guardian is in the patient's guardian list (IdentityRegistry)
-    function _isRegisteredGuardianOf(
-        address patient,
-        address guardian
-    ) internal view returns (bool) {
+    function _isRegisteredGuardianOf(address patient, address guardian) internal view returns (bool) {
         if (identityRegistry == address(0)) return false;
-        address[] memory gs = IIdentityRegistry(identityRegistry).getGuardians(
-            patient
-        );
+        address[] memory gs = IIdentityRegistry(identityRegistry).getGuardians(patient);
         for (uint256 i = 0; i < gs.length; i++) {
             if (gs[i] == guardian) return true;
         }

@@ -1,3 +1,64 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 255, 255, 255;
+  --background-end-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 10, 10, 10;
+    --background-end-rgb: 23, 23, 23;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* Simple Mode: larger touch targets (min 60px), bigger text, clearer flow */
+.simple-mode button:not([aria-hidden="true"]),
+.simple-mode a:not([aria-hidden="true"]) {
+  min-height: 60px;
+  min-width: 60px;
+  padding: 0.75rem 1rem;
+}
+.simple-mode {
+  font-size: 1.0625rem;
+}
+.simple-mode h1 { font-size: 1.75rem; }
+.simple-mode h2 { font-size: 1.5rem; }
+.simple-mode h3 { font-size: 1.25rem; }
+
+/* High Contrast: stronger borders and text contrast */
+.high-contrast body,
+.high-contrast .bg-white { background-color: #fff; }
+.high-contrast .dark .bg-neutral-900,
+.high-contrast .dark body { background-color: #0a0a0a; }
+.high-contrast .text-neutral-900 { color: #000; }
+.high-contrast .dark .text-neutral-100 { color: #fff; }
+.high-contrast .border-neutral-200 { border-color: #000; }
+.high-contrast .dark .border-neutral-700 { border-color: #fff; }
+.high-contrast button,
+.high-contrast a {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.high-contrast button:focus-visible,
+.high-contrast a:focus-visible {
+  outline-color: currentColor;
+}
+
+/* Reduced Motion */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}

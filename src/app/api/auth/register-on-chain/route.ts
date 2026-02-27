@@ -69,5 +69,4 @@ export async function POST(request: Request) {
         console.error("Registration on-chain failed:", e);
         return NextResponse.json({ error: e.message || "Transaction failed" }, { status: 500 });
     }
-    // return the hash
 }
