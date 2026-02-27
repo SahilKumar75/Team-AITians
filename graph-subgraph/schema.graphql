@@ -1,0 +1,58 @@
+type Identity @entity {
+  id: ID! # identifierHash (bytes32 hex)
+  wallet: Bytes!
+  role: String!
+  lockACid: String
+  profileCid: String
+  title: String
+  updatedAtBlock: BigInt!
+}
+
+type Doctor @entity {
+  id: ID! # wallet (lowercase)
+  identityHash: String!
+  wallet: Bytes!
+  name: String!
+  email: String
+  specialization: String
+  hospitalName: String
+  hospitalId: String
+  city: String
+  state: String
+  title: String
+  updatedAtBlock: BigInt!
+}
+
+type Hospital @entity {
+  id: ID! # hospitalId (fallback wallet)
+  identityHash: String!
+  wallet: Bytes!
+  name: String!
+  code: String
+  city: String
+  state: String
+  type: String
+  address: String
+  updatedAtBlock: BigInt!
+}
+
+type Record @entity {
+  id: ID! # recordId (bytes32 hex)
+  patient: Bytes!
+  uploader: Bytes!
+  fileCid: String!
+  fileType: String!
+  timestamp: BigInt!
+  active: Boolean!
+  lastUpdatedBlock: BigInt!
+}
+
+type AccessGrant @entity {
+  id: ID! # recordId-grantee
+  recordId: String!
+  grantee: Bytes!
+  encDekIpfsCid: String
+  txHash: Bytes!
+  grantedAtBlock: BigInt!
+  revokedAtBlock: BigInt
+}
