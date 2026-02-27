@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuthSession } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
@@ -37,6 +37,9 @@ interface MedicationData {
 export default function DoctorHome() {
     const { data: session, status } = useAuthSession();
     const router = useRouter();
+    const userRole = session?.user?.role || "";
+    const userEmail = session?.user?.email || "";
+    const userWalletAddress = session?.user?.walletAddress || "";
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState<DoctorStats | null>(null);
     const [diseases, setDiseases] = useState<DiseaseData[]>([]);
@@ -47,6 +50,7 @@ export default function DoctorHome() {
     const [availability, setAvailability] = useState<string>("");
     const [doctorName, setDoctorName] = useState<string>("");
     const { t } = useLanguage();
+    const dashboardLoadKeyRef = useRef<string>("");
 
     const DOCTOR_AVAILABILITY_KEY = "doctor_availability";
 
@@ -92,8 +96,8 @@ export default function DoctorHome() {
             // Doctor mode is only for title "Doctor", not other clinician titles
             try {
                 const profile = await loadRoleProfileFromChain(
-                    session.user.email || "",
-                    session.user.walletAddress || undefined
+                    userEmail,
+                    userWalletAddress || undefined
                 );
                 const title = typeof profile?.title === "string" ? profile.title : "";
                 if (title && title !== "Doctor") {
@@ -105,12 +109,16 @@ export default function DoctorHome() {
             } catch {
                 // allow through; profile may not exist yet
             }
+            const loadKey = `${userWalletAddress.toLowerCase()}|${userEmail.toLowerCase()}`;
+            if (dashboardLoadKeyRef.current !== loadKey) {
+                dashboardLoadKeyRef.current = loadKey;
+                await loadDoctorData();
+            }
             setLoading(false);
-            await loadDoctorData();
         }
 
         checkAuth();
-    }, [session, status, router]);
+    }, [status, userRole, userEmail, userWalletAddress, router]);
 
 
 
@@ -130,7 +138,7 @@ export default function DoctorHome() {
     }
 
     async function loadDoctorData() {
-        const addr = session?.user?.walletAddress;
+        const addr = userWalletAddress;
         if (!addr) return;
 
         try {
@@ -144,7 +152,7 @@ export default function DoctorHome() {
             // but override the main stats with real on-chain numbers
             let apiData = { diseases: [], medications: [], availability: "", stats: { totalPatients: 0, activePermissions: 0 } };
             try {
-                const response = await fetch(`/api/doctor/dashboard?wallet=${encodeURIComponent(addr)}&identifier=${encodeURIComponent(session?.user?.email || "")}`);
+                const response = await fetch(`/api/doctor/dashboard?wallet=${encodeURIComponent(addr)}&identifier=${encodeURIComponent(userEmail)}`);
                 apiData = await response.json();
             } catch (apiErr) {
                 console.warn("Dashboard API fallback failed, using empty chart data.");

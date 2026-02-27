@@ -31,6 +31,7 @@ type JourneyLike = {
       departmentId: string;
       status: "pending" | "done";
       expectedReadyAt?: number;
+      doneAt?: string;
     }>;
   }>;
 };
@@ -245,6 +246,44 @@ export default function DoctorQueuePage() {
     }
   }
 
+  async function markOrderDone(journeyId: string, checkpointId: string, orderId: string) {
+    if (!selectedPatientWallet) return;
+    setSavingJourneyId(journeyId);
+    try {
+      const details = await getJourney(journeyId, selectedPatientWallet);
+      const journeyData = details.journey as unknown as JourneyLike;
+      const updatedCheckpoints = journeyData.checkpoints.map((cp) => {
+        if (cp.id !== checkpointId) return cp;
+        return {
+          ...cp,
+          orders: (cp.orders || []).map((o) =>
+            o.orderId === orderId
+              ? { ...o, status: "done" as const, doneAt: o.doneAt || new Date().toISOString() }
+              : o
+          ),
+        };
+      });
+
+      await updateJourney(
+        journeyId,
+        { checkpoints: updatedCheckpoints as unknown[] },
+        selectedPatientWallet
+      );
+
+      const out = await getJourneys("active", selectedPatientWallet);
+      const rows = (out.journeys || []) as unknown as JourneyLike[];
+      setJourneys(rows.filter((j) => {
+        if (j.allottedDoctorWallet && j.allottedDoctorWallet.toLowerCase() !== doctorWallet) return false;
+        const activeCp = j.checkpoints.find((c) => c.status === "in_progress" || c.status === "in_queue") ||
+          j.checkpoints.find((c) => c.status === "pending");
+        if (!activeCp) return false;
+        return true;
+      }));
+    } finally {
+      setSavingJourneyId("");
+    }
+  }
+
   if (status === "loading" || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-900">
@@ -294,6 +333,24 @@ export default function DoctorQueuePage() {
             journeys.map((journey) => {
               const cp = currentCheckpointByJourney[journey.id];
               const busy = savingJourneyId === journey.id;
+              const pendingOrders = journey.checkpoints.flatMap((c) =>
+                (c.orders || [])
+                  .filter((o) => o.status === "pending")
+                  .map((o) => ({
+                    checkpointId: c.id,
+                    departmentName: c.department?.name || "Dept",
+                    order: o,
+                  }))
+              );
+              const doneOrders = journey.checkpoints.flatMap((c) =>
+                (c.orders || [])
+                  .filter((o) => o.status === "done")
+                  .map((o) => ({
+                    checkpointId: c.id,
+                    departmentName: c.department?.name || "Dept",
+                    order: o,
+                  }))
+              );
               return (
                 <article key={journey.id} className="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-5 space-y-4">
                   <div className="flex items-center justify-between gap-4">
@@ -309,6 +366,40 @@ export default function DoctorQueuePage() {
                   </div>
 
                   <div>
+                    {pendingOrders.length > 0 && (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/30 mb-4">
+                        <label className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2 block">Pending Test Orders</label>
+                        <ul className="space-y-2">
+                          {pendingOrders.map(({ checkpointId, departmentName, order }) => (
+                            <li key={order.orderId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-blue-900 dark:text-blue-100 p-2 bg-white dark:bg-neutral-800 rounded shadow-sm border border-neutral-100 dark:border-neutral-700">
+                              <span className="font-medium">• {order.testType} <span className="opacity-75 text-xs">({departmentName})</span></span>
+                              <button
+                                onClick={() => markOrderDone(journey.id, checkpointId, order.orderId)}
+                                disabled={savingJourneyId === journey.id}
+                                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
+                              >
+                                Mark Done
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {doneOrders.length > 0 && (
+                      <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-lg border border-emerald-100 dark:border-emerald-800/30 mb-4">
+                        <label className="text-sm font-medium text-emerald-800 dark:text-emerald-300 mb-2 block">Completed Test Orders</label>
+                        <ul className="space-y-2">
+                          {doneOrders.map(({ departmentName, order }) => (
+                            <li key={order.orderId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-emerald-900 dark:text-emerald-100 p-2 bg-white dark:bg-neutral-800 rounded shadow-sm border border-neutral-100 dark:border-neutral-700">
+                              <span className="font-medium">• {order.testType} <span className="opacity-75 text-xs">({departmentName})</span></span>
+                              <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                                Done {order.doneAt ? new Date(order.doneAt).toLocaleString("en-IN") : ""}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Consultation notes</label>
                     <textarea
                       value={notesByJourney[journey.id] || ""}
