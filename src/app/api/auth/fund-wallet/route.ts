@@ -30,10 +30,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, skipped: true, reason: "already-funded" });
     }
 
-    const value = ethers.parseEther(SPONSOR_AMOUNT);
+    const purpose = typeof body?.purpose === "string" ? body.purpose.trim().toLowerCase() : "";
+    const baseAmount = purpose === "upload"
+      ? ethers.parseEther(UPLOAD_SPONSOR_MIN_AMOUNT)
+      : ethers.parseEther(DEFAULT_SPONSOR_AMOUNT);
+    const buffer = ethers.parseEther(SPONSOR_BUFFER_POL);
+    const maxAmount = ethers.parseEther(MAX_SPONSOR_AMOUNT_POL);
+    const shortfall = minRequired > current ? minRequired - current : BigInt(0);
+    let value = shortfall + buffer;
+    if (value < baseAmount) value = baseAmount;
+    if (value > maxAmount) value = maxAmount;
+
     const tx = await sponsor.sendTransaction({ to: address, value });
     await tx.wait();
-    return NextResponse.json({ success: true, txHash: tx.hash, funded: SPONSOR_AMOUNT });
+    return NextResponse.json({ success: true, txHash: tx.hash, funded: ethers.formatEther(value) });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Funding failed";
     return NextResponse.json({ error: message }, { status: 500 });
