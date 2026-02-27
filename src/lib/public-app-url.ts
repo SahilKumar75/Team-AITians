@@ -1,7 +1,10 @@
 const DEFAULT_PUBLIC_BASE_URL = "https://team-aitians-74x8ajno-sahilkumar75.ipfs.4everland.app";
 
 function normalizeBaseUrl(url: string): string {
-  return url.trim().replace(/\/+$/, "");
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 export function getPublicBaseUrl(): string {
