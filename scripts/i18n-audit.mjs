@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
@@ -28,13 +28,44 @@ function sh(cmd) {
   return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" }).trim();
 }
 
+function shSafe(cmd) {
+  try {
+    return sh(cmd);
+  } catch {
+    return "";
+  }
+}
+
 function readFile(filePath) {
   return readFileSync(filePath, "utf8");
 }
 
 function listTsxFiles() {
-  const out = sh("rg --files src/app src/components src/features -g '*.tsx'");
-  return out ? out.split("\n").filter(Boolean) : [];
+  const out = shSafe("rg --files src/app src/components src/features -g '*.tsx'");
+  if (out) return out.split("\n").filter(Boolean);
+
+  const roots = ["src/app", "src/components", "src/features"];
+  const files = [];
+
+  function walk(dir) {
+    const abs = path.join(ROOT, dir);
+    if (!existsSync(abs)) return;
+
+    const entries = readdirSync(abs, { withFileTypes: true });
+    for (const entry of entries) {
+      const rel = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(rel);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith(".tsx")) {
+        files.push(rel.replace(/\\/g, "/"));
+      }
+    }
+  }
+
+  roots.forEach(walk);
+  return files;
 }
 
 function isTranslatable(text) {
