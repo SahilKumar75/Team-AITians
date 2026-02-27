@@ -1,19 +1,22 @@
 /**
- * Deploy IdentityRegistry and HealthRegistry to Polygon Amoy.
- *
- * Prerequisites:
- *   - DEPLOYER_PRIVATE_KEY in env (wallet with test POL on Amoy)
- *   - Optional: POLYGON_RPC_URL (default: https://rpc-amoy.polygon.technology)
+ * Deploy contracts to Polygon Amoy:
+ * 1) DefaultVerifier (or reuse existing)
+ * 2) IdentityRegistry(verifier) (or reuse existing)
+ * 3) HealthRegistry(verifier) (or reuse existing)
+ * Then links: HealthRegistry.setIdentityRegistry(identity)
  *
  * Usage:
  *   npx hardhat run contracts/scripts/deploy.js --network amoy
  *
- * After deploy, set in .env / production:
- *   NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS=<IdentityRegistry address>
- *   NEXT_PUBLIC_HEALTH_REGISTRY_ADDRESS=<HealthRegistry address>
+ * Optional env to resume/reuse:
+ *   EXISTING_VERIFIER_ADDRESS
+ *   EXISTING_IDENTITY_REGISTRY_ADDRESS
+ *   EXISTING_HEALTH_REGISTRY_ADDRESS
  */
 
 const hre = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
@@ -21,8 +24,12 @@ async function main() {
   const balance = await hre.ethers.provider.getBalance(deployer.address);
   console.log("Account balance:", hre.ethers.formatEther(balance), "POL");
 
-  // 1. Deploy DefaultVerifier (or reuse existing one to resume failed deploys)
+  const startBlock = await hre.ethers.provider.getBlockNumber();
+
+  // 1) DefaultVerifier (or reuse existing)
   let verifierAddress = process.env.EXISTING_VERIFIER_ADDRESS || "";
+  let verifierDeployTxHash = "";
+  let verifierStartBlock = startBlock;
   if (verifierAddress) {
     console.log("Reusing EXISTING_VERIFIER_ADDRESS:", verifierAddress);
   } else {
@@ -30,11 +37,18 @@ async function main() {
     const verifier = await DefaultVerifier.deploy();
     await verifier.waitForDeployment();
     verifierAddress = await verifier.getAddress();
-    console.log("DefaultVerifier deployed to:", verifierAddress);
+    const deployTx = verifier.deploymentTransaction();
+    const receipt = deployTx ? await deployTx.wait() : null;
+    verifierDeployTxHash = deployTx?.hash || "";
+    verifierStartBlock = receipt?.blockNumber ?? startBlock;
+    console.log("DefaultVerifier deployed:", verifierAddress);
+    console.log("DefaultVerifier tx:", verifierDeployTxHash);
   }
 
-  // 2. Deploy IdentityRegistry(verifier)
+  // 2) IdentityRegistry(verifier) (or reuse existing)
   let identityRegistryAddress = process.env.EXISTING_IDENTITY_REGISTRY_ADDRESS || "";
+  let identityDeployTxHash = "";
+  let identityStartBlock = startBlock;
   if (identityRegistryAddress) {
     console.log("Reusing EXISTING_IDENTITY_REGISTRY_ADDRESS:", identityRegistryAddress);
   } else {
@@ -42,11 +56,18 @@ async function main() {
     const identityRegistry = await IdentityRegistry.deploy(verifierAddress);
     await identityRegistry.waitForDeployment();
     identityRegistryAddress = await identityRegistry.getAddress();
-    console.log("IdentityRegistry deployed to:", identityRegistryAddress);
+    const deployTx = identityRegistry.deploymentTransaction();
+    const receipt = deployTx ? await deployTx.wait() : null;
+    identityDeployTxHash = deployTx?.hash || "";
+    identityStartBlock = receipt?.blockNumber ?? startBlock;
+    console.log("IdentityRegistry deployed:", identityRegistryAddress);
+    console.log("IdentityRegistry tx:", identityDeployTxHash);
   }
 
-  // 3. Deploy HealthRegistry(verifier)
+  // 3) HealthRegistry(verifier) (or reuse existing)
   let healthRegistryAddress = process.env.EXISTING_HEALTH_REGISTRY_ADDRESS || "";
+  let healthDeployTxHash = "";
+  let healthStartBlock = startBlock;
   if (healthRegistryAddress) {
     console.log("Reusing EXISTING_HEALTH_REGISTRY_ADDRESS:", healthRegistryAddress);
   } else {
@@ -54,18 +75,63 @@ async function main() {
     const healthRegistry = await HealthRegistry.deploy(verifierAddress);
     await healthRegistry.waitForDeployment();
     healthRegistryAddress = await healthRegistry.getAddress();
-    console.log("HealthRegistry deployed to:", healthRegistryAddress);
+    const deployTx = healthRegistry.deploymentTransaction();
+    const receipt = deployTx ? await deployTx.wait() : null;
+    healthDeployTxHash = deployTx?.hash || "";
+    healthStartBlock = receipt?.blockNumber ?? startBlock;
+    console.log("HealthRegistry deployed:", healthRegistryAddress);
+    console.log("HealthRegistry tx:", healthDeployTxHash);
   }
 
-  // 4. Link IdentityRegistry into HealthRegistry (for guardian veto on Unconscious Protocol)
+  // Link identity registry for guardian veto flow
   const health = await hre.ethers.getContractAt("HealthRegistry", healthRegistryAddress);
-  await health.setIdentityRegistry(identityRegistryAddress);
-  console.log("HealthRegistry.setIdentityRegistry(", identityRegistryAddress, ") done");
+  const tx = await health.setIdentityRegistry(identityRegistryAddress);
+  const linkReceipt = await tx.wait();
+  console.log("HealthRegistry.setIdentityRegistry done");
+  console.log("HealthRegistry.setIdentityRegistry tx:", tx.hash);
 
-  console.log("\n--- Add these to your .env (and production) ---\n");
-  console.log("NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS=" + identityRegistryAddress);
-  console.log("NEXT_PUBLIC_HEALTH_REGISTRY_ADDRESS=" + healthRegistryAddress);
-  console.log("\nVerifier (admin can call verify(doctorOrHospitalAddress)): " + verifierAddress);
+  const endBlock = await hre.ethers.provider.getBlockNumber();
+
+  console.log("\n--- DEPLOYMENT SUMMARY ---");
+  console.log("START_BLOCK=", startBlock);
+  console.log("END_BLOCK=", endBlock);
+  console.log("NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS=", identityRegistryAddress);
+  console.log("NEXT_PUBLIC_HEALTH_REGISTRY_ADDRESS=", healthRegistryAddress);
+  console.log("DEFAULT_VERIFIER_ADDRESS=", verifierAddress);
+
+  const deploymentMeta = {
+    network: "polygon-amoy",
+    deployer: deployer.address,
+    startedAtBlock: startBlock,
+    endedAtBlock: endBlock,
+    contracts: {
+      DefaultVerifier: {
+        address: verifierAddress,
+        deployTxHash: verifierDeployTxHash,
+        startBlock: verifierStartBlock,
+      },
+      IdentityRegistry: {
+        address: identityRegistryAddress,
+        deployTxHash: identityDeployTxHash,
+        startBlock: identityStartBlock,
+      },
+      HealthRegistry: {
+        address: healthRegistryAddress,
+        deployTxHash: healthDeployTxHash,
+        startBlock: healthStartBlock,
+      },
+    },
+    links: {
+      healthSetIdentityRegistryTxHash: tx.hash,
+      healthSetIdentityRegistryBlock: linkReceipt?.blockNumber ?? endBlock,
+    },
+  };
+
+  const outDir = path.join(process.cwd(), "contracts", "deployments");
+  fs.mkdirSync(outDir, { recursive: true });
+  const outPath = path.join(outDir, "amoy-latest.json");
+  fs.writeFileSync(outPath, JSON.stringify(deploymentMeta, null, 2) + "\n", "utf8");
+  console.log("Deployment metadata written:", outPath);
 }
 
 main().catch((err) => {

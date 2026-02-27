@@ -1,12 +1,12 @@
 {
   "matic-amoy": {
     "IdentityRegistry": {
-      "address": "0x4e7ef9FbCef612E9ba5c2ed242C5BB8d02Db4201",
-      "startBlock": 34327700
+      "address": "0x56c25aE1c7715755578f5a80d9b3586d3744eD57",
+      "startBlock": 34543629
     },
     "HealthRegistry": {
-      "address": "0x2Ca550F4EB6099F469e4D068Ad9e0457a53AA66e",
-      "startBlock": 34421900
+      "address": "0x0e61DEC0A20808c004bC13dDa75c3Ff3340b7A91",
+      "startBlock": 34543633
     }
   }
 }

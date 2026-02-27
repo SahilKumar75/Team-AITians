@@ -4,10 +4,13 @@
  * Usage:
  *   npx hardhat run contracts/scripts/deploy-role-verifier.js --network amoy
  *
- * Requires:
- *   - DEPLOYER_PRIVATE_KEY
- *   - NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS
- *   - NEXT_PUBLIC_HEALTH_REGISTRY_ADDRESS
+ * Requires env:
+ *   NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS
+ *   NEXT_PUBLIC_HEALTH_REGISTRY_ADDRESS
+ *
+ * Optional fallback env:
+ *   EXISTING_IDENTITY_REGISTRY_ADDRESS
+ *   EXISTING_HEALTH_REGISTRY_ADDRESS
  */
 
 const hre = require("hardhat");
@@ -63,10 +66,7 @@ async function main() {
     switchedHealth = true;
     console.log("HealthRegistry.setVerifier done");
   } else {
-    console.log(
-      "SKIP HealthRegistry.setVerifier: signer is not owner. Required owner:",
-      healthOwner
-    );
+    console.log("SKIP HealthRegistry.setVerifier: signer is not owner. Required owner:", healthOwner);
   }
 
   if (identityOwner.toLowerCase() === deployer.address.toLowerCase()) {
@@ -75,10 +75,7 @@ async function main() {
     switchedIdentity = true;
     console.log("IdentityRegistry.setVerifier done");
   } else {
-    console.log(
-      "SKIP IdentityRegistry.setVerifier: signer is not owner. Required owner:",
-      identityOwner
-    );
+    console.log("SKIP IdentityRegistry.setVerifier: signer is not owner. Required owner:", identityOwner);
   }
 
   const [newIdentityVerifier, newHealthVerifier] = await Promise.all([
@@ -92,10 +89,11 @@ async function main() {
   console.log("HealthRegistry verifier now:", newHealthVerifier);
   console.log("Switched HealthRegistry:", switchedHealth);
   console.log("Switched IdentityRegistry:", switchedIdentity);
+  console.log("ROLE_BASED_VERIFIER_ADDRESS=", roleVerifierAddress);
 
   if (!switchedIdentity) {
     console.log("\nACTION REQUIRED:");
-    console.log("Run this same script with IdentityRegistry owner wallet/private key to complete full switch.");
+    console.log("Run this script with IdentityRegistry owner wallet/private key to complete full switch.");
   }
 }
 

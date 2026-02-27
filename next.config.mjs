@@ -1,7 +1,11 @@
 import withPWA from 'next-pwa';
 
 /** @type {import('next').NextConfig} */
+const isStaticExport = process.env.NEXT_STATIC_EXPORT === 'true';
+
 const nextConfig = {
+  output: isStaticExport ? 'export' : undefined,
+  images: isStaticExport ? { unoptimized: true } : undefined,
   webpack: (config, { isServer }) => {
     config.experiments = {
       ...config.experiments,

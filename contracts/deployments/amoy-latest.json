@@ -1,0 +1,27 @@
+{
+  "network": "polygon-amoy",
+  "deployer": "0x2c57dB7ec15a01eC3B51979aB0c85D0C0d98C433",
+  "startedAtBlock": 34543621,
+  "endedAtBlock": 34543637,
+  "contracts": {
+    "DefaultVerifier": {
+      "address": "0x98D24Ace433FCc5DE6caa43C6Bf39Cc873ba3f4D",
+      "deployTxHash": "0x2779a61f3c40dc28ffb2064f2d8261cf6a863f3c93d8991b0a99706e2387dc21",
+      "startBlock": 34543625
+    },
+    "IdentityRegistry": {
+      "address": "0x56c25aE1c7715755578f5a80d9b3586d3744eD57",
+      "deployTxHash": "0x930a62bf856b97376b83116d4105fcf1b67c60fc3a277a3c114a70cf446aaf95",
+      "startBlock": 34543629
+    },
+    "HealthRegistry": {
+      "address": "0x0e61DEC0A20808c004bC13dDa75c3Ff3340b7A91",
+      "deployTxHash": "0x0640474f3e09ff758e1cbf27be6e50f2c7b571b9960276a3fa332d0053a94d8a",
+      "startBlock": 34543633
+    }
+  },
+  "links": {
+    "healthSetIdentityRegistryTxHash": "0xb1dfee41c222e917d10f210d5736dbebdeee89576803091f56dde7c125ef71ce",
+    "healthSetIdentityRegistryBlock": 34543637
+  }
+}
