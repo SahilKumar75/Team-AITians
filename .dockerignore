@@ -1,0 +1,14 @@
+.git
+.gitignore
+.next
+node_modules
+npm-debug.log
+yarn-error.log
+.env
+.env.*
+coverage
+dist
+out
+artifacts
+cache
+README.md
