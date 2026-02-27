@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { catFromIPFSNode, isIPFSNodeConfigured } from "@/lib/ipfs-node";
-import { fetchFromPinataGateway, isPinataConfigured } from "@/lib/pinata-server";
+import { fetchFromPinataGateway, isPinataGatewayConfigured } from "@/lib/pinata-server";
 
 export const dynamic = "force-dynamic";
 export const dynamicParams = true;
@@ -22,10 +22,10 @@ export async function GET(
   }
 
   const hasNode = isIPFSNodeConfigured();
-  const hasPinata = isPinataConfigured();
-  if (!hasNode && !hasPinata) {
+  const hasPinataGateway = isPinataGatewayConfigured();
+  if (!hasNode && !hasPinataGateway) {
     return NextResponse.json(
-      { error: "IPFS not configured. Set IPFS_API_URL (self-hosted) or PINATA_JWT (Pinata)." },
+      { error: "IPFS not configured. Set IPFS_API_URL (self-hosted) or an IPFS gateway." },
       { status: 503 }
     );
   }
@@ -46,7 +46,7 @@ export async function GET(
     }
   }
 
-  if (hasPinata) {
+  if (hasPinataGateway) {
     try {
       const buffer = await fetchFromPinataGateway(cid);
       return new NextResponse(buffer, {
