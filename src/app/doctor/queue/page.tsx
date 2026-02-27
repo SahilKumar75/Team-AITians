@@ -304,18 +304,18 @@ export default function DoctorQueuePage() {
         <section>
           <h1 className="text-3xl font-bold text-neutral-900 dark:text-neutral-100">{tx("Doctor Queue")}</h1>
           <p className="text-neutral-600 dark:text-neutral-400 mt-1">
-            Complete checkup, add notes, and create test orders for your allotted patients.
+            {tx("Complete checkup, add notes, and create test orders for your allotted patients.")}
           </p>
         </section>
 
         <section className="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-4">
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Patient</label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">{tx("Patient")}</label>
           <select
             value={selectedPatientWallet}
             onChange={(e) => setSelectedPatientWallet(e.target.value)}
             className="mt-2 w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700"
           >
-            {patientWallets.length === 0 && <option value="">No granted patients</option>}
+            {patientWallets.length === 0 && <option value="">{tx("No granted patients")}</option>}
             {patientWallets.map((wallet) => (
               <option key={wallet} value={wallet}>
                 {patientNames[wallet] ? `${patientNames[wallet]} — ${wallet}` : wallet}
@@ -327,7 +327,7 @@ export default function DoctorQueuePage() {
         <section className="space-y-4">
           {journeys.length === 0 ? (
             <div className="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 p-8 text-center text-neutral-500">
-              No active journeys for this patient and doctor.
+              {tx("No active journeys for this patient and doctor.")}
             </div>
           ) : (
             journeys.map((journey) => {
@@ -368,7 +368,7 @@ export default function DoctorQueuePage() {
                   <div>
                     {pendingOrders.length > 0 && (
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/30 mb-4">
-                        <label className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2 block">Pending Test Orders</label>
+                        <label className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2 block">{tx("Pending Test Orders")}</label>
                         <ul className="space-y-2">
                           {pendingOrders.map(({ checkpointId, departmentName, order }) => (
                             <li key={order.orderId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-blue-900 dark:text-blue-100 p-2 bg-white dark:bg-neutral-800 rounded shadow-sm border border-neutral-100 dark:border-neutral-700">
@@ -378,7 +378,7 @@ export default function DoctorQueuePage() {
                                 disabled={savingJourneyId === journey.id}
                                 className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition"
                               >
-                                Mark Done
+                                {tx("Mark Done")}
                               </button>
                             </li>
                           ))}
@@ -387,36 +387,36 @@ export default function DoctorQueuePage() {
                     )}
                     {doneOrders.length > 0 && (
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-lg border border-emerald-100 dark:border-emerald-800/30 mb-4">
-                        <label className="text-sm font-medium text-emerald-800 dark:text-emerald-300 mb-2 block">Completed Test Orders</label>
+                        <label className="text-sm font-medium text-emerald-800 dark:text-emerald-300 mb-2 block">{tx("Completed Test Orders")}</label>
                         <ul className="space-y-2">
                           {doneOrders.map(({ departmentName, order }) => (
                             <li key={order.orderId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-emerald-900 dark:text-emerald-100 p-2 bg-white dark:bg-neutral-800 rounded shadow-sm border border-neutral-100 dark:border-neutral-700">
                               <span className="font-medium">• {order.testType} <span className="opacity-75 text-xs">({departmentName})</span></span>
                               <span className="text-xs text-emerald-700 dark:text-emerald-300">
-                                Done {order.doneAt ? new Date(order.doneAt).toLocaleString("en-IN") : ""}
+                                {tx("Done")} {order.doneAt ? new Date(order.doneAt).toLocaleString("en-IN") : ""}
                               </span>
                             </li>
                           ))}
                         </ul>
                       </div>
                     )}
-                    <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Consultation notes</label>
+                    <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">{tx("Consultation notes")}</label>
                     <textarea
                       value={notesByJourney[journey.id] || ""}
                       onChange={(e) => setNotesByJourney((prev) => ({ ...prev, [journey.id]: e.target.value }))}
-                      placeholder="Doctor notes visible in patient timeline"
+                      placeholder={tx("Doctor notes visible in patient timeline")}
                       className="mt-1 w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700"
                       rows={3}
                     />
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Test orders</label>
-                    <p className="text-xs text-neutral-500 mt-1">Format: `Blood Test@2026-02-25 14:00, MRI@2026-02-26 10:30`</p>
+                    <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">{tx("Test orders")}</label>
+                    <p className="text-xs text-neutral-500 mt-1">{tx("Format: `Blood Test@2026-02-25 14:00, MRI@2026-02-26 10:30`")}</p>
                     <input
                       value={ordersByJourney[journey.id] || ""}
                       onChange={(e) => setOrdersByJourney((prev) => ({ ...prev, [journey.id]: e.target.value }))}
-                      placeholder="Comma separated orders"
+                      placeholder={tx("Comma separated orders")}
                       className="mt-2 w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700"
                     />
                   </div>
@@ -439,7 +439,7 @@ export default function DoctorQueuePage() {
           <div className="flex items-start gap-2">
             <Stethoscope className="h-4 w-4 mt-0.5" />
             <p>
-              Only allotted doctor checkpoints are listed. Completion writes notes and orders into the journey payload so patients can see synchronized timeline updates.
+              {tx("Only allotted doctor checkpoints are listed. Completion writes notes and orders into the journey payload so patients can see synchronized timeline updates.")}
             </p>
           </div>
         </section>

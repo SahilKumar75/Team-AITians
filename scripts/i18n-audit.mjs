@@ -45,6 +45,11 @@ function isTranslatable(text) {
   if (t.startsWith("{") || t.endsWith("}")) return false;
   if (t.includes("${") || t.includes("className") || t.includes("=>")) return false;
   if (t.includes("<") || t.includes(">")) return false;
+  if (/\b(?:const|let|var|function|await|return|Promise|new|Map|Set|toLowerCase|filter|map)\b/.test(t)) return false;
+  if (/[;{}]/.test(t)) return false;
+  if (t.includes("||") || t.includes("&&") || t.includes("??")) return false;
+  if (/\)\s*:\s*[A-Za-z]/.test(t)) return false;
+  if (/^\(?[a-zA-Z_][a-zA-Z0-9_]*\s*[:=]/.test(t)) return false;
   if (ALLOWLIST_PATTERNS.some((rx) => rx.test(t))) return false;
   return true;
 }

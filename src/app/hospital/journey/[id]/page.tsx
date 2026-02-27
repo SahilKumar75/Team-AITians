@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { getJourney } from "@/features/journey/api";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Checkpoint {
   id: string;
@@ -65,6 +66,7 @@ const defaultStatus = { label: "Pending", color: "bg-gray-200 dark:bg-gray-700 t
 export default function StaffJourneyPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { data: session, status: authStatus } = useAuthSession();
+  const { tx } = useLanguage();
   const [journey, setJourney] = useState<Journey | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -118,7 +120,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
         <main className="max-w-4xl mx-auto px-4 py-8 pt-24">
           <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-6 text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-            <p className="text-red-700 dark:text-red-300">{error}</p>
+            <p className="text-red-700 dark:text-red-300">{tx(error)}</p>
           </div>
         </main>
       </div>
@@ -142,7 +144,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
           className="inline-flex items-center gap-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Dashboard
+          {tx("Back to Dashboard")}
         </Link>
 
         {/* Patient Info Card */}
@@ -196,7 +198,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
                 </p>
                 <div className="mt-2">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${(statusConfig[currentCheckpoint.status as keyof typeof statusConfig] || defaultStatus).color}`}>
-                    {(statusConfig[currentCheckpoint.status as keyof typeof statusConfig] || defaultStatus).label}
+                    {tx((statusConfig[currentCheckpoint.status as keyof typeof statusConfig] || defaultStatus).label)}
                   </span>
                 </div>
               </div>
@@ -211,7 +213,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 mb-6 text-red-700 dark:text-red-300">
             <AlertCircle className="w-5 h-5 inline mr-2" />
-            {error}
+            {tx(error)}
           </div>
         )}
 
@@ -293,7 +295,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
                       {checkpoint.orders && checkpoint.orders.length > 0 && (
                         <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900/40 p-3">
                           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300 mb-2">
-                            Test Orders
+                            {tx("Test Orders")}
                           </p>
                           <ul className="space-y-2">
                             {checkpoint.orders.map((order, idx) => (
@@ -310,7 +312,7 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
                                   </span>
                                 ) : (
                                   <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                                    Pending
+                                    {tx("Pending")}
                                   </span>
                                 )}
                               </li>
