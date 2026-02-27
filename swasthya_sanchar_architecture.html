@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swasthya Sanchar - Technical Architecture & Data Flows</title>
+    <!-- Include Mermaid.js for flow diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary: #10b981;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #64748b;
+            --border: #e2e8f0;
+            --surface: #ffffff;
+            --error: #ef4444;
+            --font-main: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            line-height: 1.6;
+            color: var(--dark);
+            background-color: var(--light);
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 4rem;
+            padding: 3rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            color: var(--primary-dark);
+            margin: 2.5rem 0 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border);
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            color: var(--dark);
+            margin: 1.5rem 0 1rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+            color: #334155;
+        }
+
+        .section-card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            border: 1px solid var(--border);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            background: white;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: #f1f5f9;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .flow-box {
+            background: #f8fafc;
+            border-left: 4px solid var(--primary);
+            padding: 1.5rem;
+            margin: 1rem 0;
+            font-family: 'Courier New', Courier, monospace;
+            border-radius: 0 8px 8px 0;
+            overflow-x: auto;
+        }
+
+        .diagram-container {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+            margin: 1.5rem 0;
+            overflow-x: auto;
+            text-align: center;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            background: #e0f2fe;
+            color: var(--primary-dark);
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #047857;
+        }
+
+        ul {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+
+            body {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🏥 Swasthya Sanchar</h1>
+            <p style="color: white; font-size: 1.2rem; margin: 0;">Decentralised Medical Records System Architecture &
+                Code Flows</p>
+            <p style="color: rgba(255,255,255,0.8); margin-top: 1rem;">Patient-sovereign, blockchain-anchored, zero
+                third-party auth</p>
+        </header>
+
+        <div class="section-card">
+            <h2>1. Structure & Project Architecture</h2>
+            <p>The system follows an MVVM (Model-View-ViewModel) inspired architecture on the frontend, with Web3 smart
+                contracts acting as the distributed backend state, and IPFS as the decentralized storage layer.</p>
+
+            <div class="grid-2">
+                <div>
+                    <h3>Folder Structure</h3>
+                    <ul>
+                        <li><strong>/src/app:</strong> Next.js 14 App Router pages (Views). Divided into patient,
+                            doctor, hospital, and emergency routes.</li>
+                        <li><strong>/src/lib:</strong> Core logic, cryptography (crypto-identity.ts, crypto-files.ts),
+                            Helia integrations, local RxDB logic.</li>
+                        <li><strong>/contracts:</strong> Solidity smart contracts (Model) for Polygon Amoy blockchain.
+                        </li>
+                        <li><strong>/docs:</strong> Architectural references, data storage, and role documentation.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Core Concepts</h3>
+                    <ul>
+                        <li><span class="badge">Decentralized</span> No central databases. Data lives on IPFS &
+                            Blockchain.</li>
+                        <li><span class="badge badge-success">Sovereign Auth</span> "Zero MetaMask". Wallet generated
+                            implicitly via email/password.</li>
+                        <li><span class="badge">Local First</span> RxDB / IndexedDB used for fast, offline capabilities.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2>2. Technology Stack & Selection Rationale</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Technology</th>
+                        <th>Layer</th>
+                        <th>Why Selected?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Next.js 14 (App Router)</strong></td>
+                        <td>Frontend</td>
+                        <td>Allows robust routing, API endpoints, and fast React-based UI development.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Polygon Amoy Testnet</strong></td>
+                        <td>Blockchain</td>
+                        <td>Fast transaction speeds, exceptionally low gas fees, Ethereum-compatible EVM.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Helia (self-hosted)</strong></td>
+                        <td>IPFS Node</td>
+                        <td>Replaces third-party pinning (like Pinata) to ensure true decentralization within the app.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>RxDB (IndexedDB)</strong></td>
+                        <td>Local DB</td>
+                        <td>Provides instant load states and offline-first capabilities for mobile users.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Brotli WASM</strong></td>
+                        <td>Compression</td>
+                        <td>Provides 40-60% smaller IPFS payloads, crucial for saving expensive bandwidth on medical
+                            imaging (X-Rays).</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Web Crypto API + noble/hashes</strong></td>
+                        <td>Cryptography</td>
+                        <td>Ensures robust client-side hashing and encryption (AES-256-GCM) without third-party
+                            authentication services.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Fleek.co</strong></td>
+                        <td>Hosting</td>
+                        <td>Deploys directly to IPFS, removing vendor lock-in.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-card">
+            <h2>3. Smart Contract Information</h2>
+
+            <h3>IdentityRegistry.sol</h3>
+            <p>Manages user identities (Patient, Doctor, Hospital) matching a hashed identifier with user's encrypted
+                wallets.</p>
+            <ul>
+                <li><strong>Struct Identity:</strong> Stores <code>lockACid</code>, <code>lockCCid</code> (legacy
+                    placeholder),
+                    <code>recoveryKeyHash</code> (legacy placeholder), <code>emergencyCid</code> (Tier 0 public
+                    profile), wallet address,
+                    role, and license hash.
+                </li>
+                <li><strong>Capabilities:</strong> Adding/removing guardians, social recovery mechanics, lock updates.
+                    Note: Recovery phrases have been superseded by <strong>Social Recovery</strong>.
+                </li>
+                <li><strong>Role Verification:</strong> Doctor verification uses a decentralized <code>IVerifier</code>
+                    interface before granting privileges.</li>
+            </ul>
+
+            <h3>HealthRegistry.sol</h3>
+            <p>Manages references to IPFS records, per-document access lists, and emergency protocols.</p>
+            <ul>
+                <li><strong>Optimization:</strong> Encrypted DEKs are <strong>not</strong> stored in contract state
+                    arrays (costs $$$). Instead, they are fired as <code>AccessGranted(encDekIpfsCid)</code> events,
+                    reducing gas fees by 99.6%.</li>
+                <li><strong>Verification Gate:</strong> <code>require(verifier.isVerified(grantee))</code> ensures only
+                    real doctors get access.</li>
+            </ul>
+        </div>
+
+        <div class="section-card">
+            <h2>4. Patient Data Flow</h2>
+            <p>The patient is the sovereign owner of their data. From registration to document management, all flows are
+                handled locally on the client before being anchored on-chain.</p>
+
+            <h3>A. Registration & Identity Flow</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    sequenceDiagram
+                    autonumber
+                    actor Patient
+                    participant UI as Register Page (/auth/register)
+                    participant Crypto as Client-side Crypto (lib/crypto-identity)
+                    participant IPFS as Helia IPFS
+                    participant SC as IdentityRegistry.sol
+
+                    Patient->>UI: Enter Email/Phone & Password
+                    UI->>Crypto: Generate Secp256k1 Wallet (Identity)
+                    UI->>Crypto: Derive AES-256 Key via Argon2id (from identifier:password)
+                    Crypto->>Crypto: Encrypt Private Key (Lock A)
+                    Note over Crypto: No Recovery Phrase (Superseded by Social Recovery)
+
+                    UI->>IPFS: Pin Lock A Blob
+                    IPFS-->>UI: Return CID
+
+                    UI->>SC: register(idHash, lockACid, "", ZeroHash, "", role, licenseHash)
+                    SC-->>UI: Identity Created ✅
+                </div>
+            </div>
+
+            <h3>B. Document Upload & Sovereignty</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    flowchart TD
+                    U[Patient Choice: Medical PDF] --> DEK[Generate random Data Encryption Key]
+                    DEK --> ENC[AES-256-GCM Encryption]
+                    ENC --> IPFS_F[(Helia IPFS: Encrypted File)]
+
+                    IPFS_F --> CID[Returns File CID]
+                    CID --> SUB[Submit to HealthRegistry.addRecord]
+                    SUB --> SC{HealthRegistry.sol}
+
+                    DEK --> WRAP[Wrap DEK for Patient: PBKDF2 from Wallet Addr]
+                    WRAP --> MANIFEST[Create Access Manifest JSON]
+                    MANIFEST --> IPFS_M[(Helia IPFS: Manifest)]
+                    IPFS_M --> MCID[Returns Manifest CID]
+
+                    MCID --> GRANT[Anchor via HealthRegistry.grantAccess]
+                    GRANT --> SC
+                    SC --> |Record & Manifest anchored| P[Patient Dashboard Updated]
+                </div>
+            </div>
+
+            <h3>C. Timeline & Visit Management</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    sequenceDiagram
+                    autonumber
+                    participant UI as /patient/timeline
+                    participant API as Journey API
+
+                    UI->>API: Fetch 'all' journeys for wallet
+                    API-->>UI: Returns visit logs (token numbers, hospitals, checklists)
+
+                    Note over UI: UI logic reconstructs history
+                    UI->>UI: Aggregate Doctor Notes from Checkpoints
+                    UI->>UI: Map Diagnostic Test Orders to Timeline
+                    UI->>UI: Sort by startedAt/completedAt timestamps
+                    UI-->>Patient: Shows Unified Medical History
+                </div>
+            </div>
+
+            <h3>D. Access Granting Flow (Sharing with Clinician)</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    sequenceDiagram
+                    autonumber
+                    actor Patient
+                    participant UI as Grant Access Modal
+                    participant IPFS as Helia IPFS
+                    participant SC as HealthRegistry.sol
+
+                    Patient->>UI: Select Doctor & Grant Access
+                    UI->>SC: Fetch current Manifest CID
+                    SC-->>UI: Returns CID
+                    UI->>IPFS: Download Manifest JSON
+                    IPFS-->>UI: Returns Encrypted DEK Entries
+
+                    Note over UI: Unwrap DEK using Patient's Wallet-derived Key
+                    Note over UI: Wrap same DEK using Doctor's Wallet-derived Key
+
+                    UI->>UI: Append Doctor's Entry to Manifest
+                    UI->>IPFS: Pin New Manifest JSON
+                    IPFS-->>UI: Returns New Manifest CID
+
+                    UI->>SC: grantAccess(recordId, doctorWallet, manifestCid, manifestCid)
+                    SC-->>UI: Access Granted ✅
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2>5. Doctor Data Flow</h2>
+            <p>Doctors operate inside a permissioned environment where access is strictly granted by patients through
+                the blockchain.</p>
+
+            <h3>A. Patient Access & Search</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    sequenceDiagram
+                    autonumber
+                    actor Doctor
+                    participant UI as /doctor/patients
+                    participant SC as HealthRegistry.sol
+                    participant Block as Polygon Blockchain
+
+                    Doctor->>UI: Search Patient (by Identifier Hash)
+                    UI->>Block: query getGrantedPatientsForDoctor(doctorWallet)
+                    Block-->>UI: Returns permitted patient list
+
+                    Doctor->>UI: Selects Patient
+                    UI->>SC: Fetch Patient Records via getPatientRecords(patientWallet)
+                    SC-->>UI: Returns Metadata (CIDs, types, dates)
+                </div>
+            </div>
+
+            <h3>B. Queue Handling & Clinical Updates</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    flowchart LR
+                    Q[Doctor Queue] -->|Select Patient| S[Start Consultation]
+                    S -->|UI| N[Input Consultation Notes]
+                    S -->|UI| T[Input Test Orders: 'MRI@Tomorrow']
+
+                    N & T -->|Mark Checkup Done| API[Journey Update API]
+
+                    API -->|Save Checkpoint| C[Checkpoint Completed]
+                    API -->|Dynamic Logic| DC[Inject NEW "Pending" Checkpoints for Labs]
+                    API -->|Recalculate| P[Journey Progress % Increased]
+
+                    P -->|Notify| PAT[Patient Timeline Updated]
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2>6. Hospital & Emergency Flows</h2>
+
+            <h3>A. Hospital Journey Monitoring</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    flowchart TD
+                    H[Hospital Staff] -->|View| HJ(/hospital/journey/id)
+                    HJ --> API[Fetch Journey Metadata]
+                    API --> |View Status| List[Map Checkpoints Timeline]
+                    List --> SQ[Status: in_queue / in_progress / completed]
+                    List --> Loc[Show Department, Floor, Wing]
+                </div>
+            </div>
+
+            <h3>B. Emergency (Zero-Net QR)</h3>
+            <div class="diagram-container">
+                <div class="mermaid">
+                    flowchart TD
+                    P[Patient Emergency Page] --> E[Encode Emergency Profile]
+                    E --> QR[Generate QR Code]
+                    QR --> |"Zero-Net" Protocol| SW[Service Worker Caches Profile]
+                    FR[First Responder Scans] --> |Offline| SP[Shows Vitals: Blood Group, Allergies, ICE]
+                </div>
+            </div>
+        </div>
+
+        <footer style="text-align: center; margin-top: 2rem; color: var(--gray); font-size: 0.9rem;">
+            Generated by Swasthya Sanchar Documentation Engine • Polygon Amoy • Helia IPFS
+        </footer>
+    </div>
+</body>
+
+</html>

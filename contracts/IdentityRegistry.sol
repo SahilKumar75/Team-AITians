@@ -20,26 +20,13 @@ contract DefaultVerifier is IVerifier {
     event EntityVerified(address indexed entity);
     event EntityRevoked(address indexed entity);
 
-    constructor() {
-        admin = msg.sender;
-    }
+    constructor() { admin = msg.sender; }
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not admin");
-        _;
-    }
+    modifier onlyAdmin() { require(msg.sender == admin, "Not admin"); _; }
 
-    function verify(address entity) external onlyAdmin {
-        verified[entity] = true;
-        emit EntityVerified(entity);
-    }
-    function revoke(address entity) external onlyAdmin {
-        verified[entity] = false;
-        emit EntityRevoked(entity);
-    }
-    function isVerified(address entity) external view override returns (bool) {
-        return verified[entity];
-    }
+    function verify(address entity) external onlyAdmin { verified[entity] = true; emit EntityVerified(entity); }
+    function revoke(address entity) external onlyAdmin { verified[entity] = false; emit EntityRevoked(entity); }
+    function isVerified(address entity) external view override returns (bool) { return verified[entity]; }
 }
 
 /**
@@ -56,15 +43,15 @@ contract IdentityRegistry {
     IVerifier public verifier;
 
     struct Identity {
-        string lockACid; // IPFS CID: Argon2id(password, salt) key → AES-256-GCM(privKey)
-        string lockCCid; // IPFS CID: AES-256-GCM(privKey, recoveryPhrase)
-        bytes32 recoveryKeyHash; // keccak256(recoveryPhrase) — for client-side verification only
-        string emergencyCid; // IPFS CID: Tier-0 public emergency profile (minimal fields)
+        string lockACid;            // IPFS CID: Argon2id(password, salt) key → AES-256-GCM(privKey)
+        string lockCCid;            // IPFS CID: AES-256-GCM(privKey, recoveryPhrase)
+        bytes32 recoveryKeyHash;    // keccak256(recoveryPhrase) — for client-side verification only
+        string emergencyCid;        // IPFS CID: Tier-0 public emergency profile (minimal fields)
         address wallet;
-        bytes32 role; // "patient" | "doctor" | "hospital"
-        bytes32 licenseHash; // keccak256(licenseNumber) — submitted by doctor at registration
+        bytes32 role;               // "patient" | "doctor" | "hospital"
+        bytes32 licenseHash;        // keccak256(licenseNumber) — submitted by doctor at registration
         bool exists;
-        string title; // Optional: "Doctor" | "Surgeon" | "Nurse" | "Consultant" | "Resident" | "" (added last for storage layout)
+        string title;               // Optional: "Doctor" | "Surgeon" | "Nurse" | "Consultant" | "Resident" | "" (added last for storage layout)
     }
 
     // keccak256(email or phone) → Identity
@@ -85,42 +72,22 @@ contract IdentityRegistry {
     mapping(address => uint8) public recoveryThreshold;
 
     // ─── Events ───────────────────────────────────────────────────────────────
-    event IdentityRegistered(
-        bytes32 indexed identifierHash,
-        address indexed wallet,
-        bytes32 role
-    );
+    event IdentityRegistered(bytes32 indexed identifierHash, address indexed wallet, bytes32 role);
     event LockAUpdated(bytes32 indexed identifierHash, string newLockACid);
-    event EmergencyCidUpdated(
-        bytes32 indexed identifierHash,
-        string newEmergencyCid
-    );
+    event EmergencyCidUpdated(bytes32 indexed identifierHash, string newEmergencyCid);
     event DoctorVerified(address indexed wallet);
     event VerifierUpdated(address indexed newVerifier);
     event GuardianAdded(address indexed patient, address indexed guardian);
     event GuardianRemoved(address indexed patient, address indexed guardian);
     event RecoveryInitiated(address indexed patient, string proposedLockACid);
-    event RecoveryVoted(
-        address indexed patient,
-        address indexed guardian,
-        uint8 votesTotal
-    );
+    event RecoveryVoted(address indexed patient, address indexed guardian, uint8 votesTotal);
     event RecoveryCompleted(address indexed patient, string newLockACid);
     event RecoveryCancelled(address indexed patient);
     event TitleUpdated(bytes32 indexed identifierHash, string title);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
-    }
-    modifier exists(bytes32 idHash) {
-        require(identities[idHash].exists, "Not found");
-        _;
-    }
-    modifier onlyWallet(bytes32 idHash) {
-        require(identities[idHash].wallet == msg.sender, "Not your identity");
-        _;
-    }
+    modifier onlyOwner() { require(msg.sender == owner, "Not owner"); _; }
+    modifier exists(bytes32 idHash) { require(identities[idHash].exists, "Not found"); _; }
+    modifier onlyWallet(bytes32 idHash) { require(identities[idHash].wallet == msg.sender, "Not your identity"); _; }
 
     constructor(address _verifier) {
         owner = msg.sender;
@@ -156,10 +123,7 @@ contract IdentityRegistry {
         bytes32 licenseHash
     ) external {
         require(!identities[identifierHash].exists, "Identifier taken");
-        require(
-            walletToIdentifier[msg.sender] == bytes32(0),
-            "Wallet already used"
-        );
+        require(walletToIdentifier[msg.sender] == bytes32(0), "Wallet already used");
 
         identities[identifierHash] = Identity({
             lockACid: lockACid,
@@ -180,27 +144,22 @@ contract IdentityRegistry {
 
     // ─── Lock Updates ─────────────────────────────────────────────────────────
 
-    function updateLockA(
-        bytes32 idHash,
-        string calldata newLockACid
-    ) external exists(idHash) onlyWallet(idHash) {
+    function updateLockA(bytes32 idHash, string calldata newLockACid)
+        external exists(idHash) onlyWallet(idHash)
+    {
         identities[idHash].lockACid = newLockACid;
         emit LockAUpdated(idHash, newLockACid);
     }
 
-    function updateEmergencyCid(
-        bytes32 idHash,
-        string calldata newEmergencyCid
-    ) external exists(idHash) onlyWallet(idHash) {
+    function updateEmergencyCid(bytes32 idHash, string calldata newEmergencyCid)
+        external exists(idHash) onlyWallet(idHash)
+    {
         identities[idHash].emergencyCid = newEmergencyCid;
         emit EmergencyCidUpdated(idHash, newEmergencyCid);
     }
 
     /// @notice Set optional title for display and Unconscious Protocol (e.g. "Surgeon", "Nurse")
-    function setTitle(
-        bytes32 idHash,
-        string calldata title
-    ) external exists(idHash) onlyWallet(idHash) {
+    function setTitle(bytes32 idHash, string calldata title) external exists(idHash) onlyWallet(idHash) {
         identities[idHash].title = title;
         emit TitleUpdated(idHash, title);
     }
@@ -238,10 +197,7 @@ contract IdentityRegistry {
      * @notice Guardian initiates recovery or votes on existing proposal
      * @dev All guardians must agree on the SAME newLockACid. First voter sets the proposal.
      */
-    function voteForRecovery(
-        address patient,
-        string calldata proposedLockACid
-    ) external {
+    function voteForRecovery(address patient, string calldata proposedLockACid) external {
         require(!guardianVotes[patient][msg.sender], "Already voted");
         require(_isGuardian(patient, msg.sender), "Not a guardian");
 
@@ -251,20 +207,14 @@ contract IdentityRegistry {
             emit RecoveryInitiated(patient, proposedLockACid);
         } else {
             // All votes must agree on the same proposed key
-            require(
-                keccak256(bytes(pendingNewLockACid[patient])) ==
-                    keccak256(bytes(proposedLockACid)),
-                "Proposal mismatch"
-            );
+            require(keccak256(bytes(pendingNewLockACid[patient])) == keccak256(bytes(proposedLockACid)), "Proposal mismatch");
         }
 
         guardianVotes[patient][msg.sender] = true;
         recoveryVoteCount[patient]++;
         emit RecoveryVoted(patient, msg.sender, recoveryVoteCount[patient]);
 
-        uint8 threshold = recoveryThreshold[patient] == 0
-            ? 2
-            : recoveryThreshold[patient];
+        uint8 threshold = recoveryThreshold[patient] == 0 ? 2 : recoveryThreshold[patient];
         if (recoveryVoteCount[patient] >= threshold) {
             bytes32 idHash = walletToIdentifier[patient];
             identities[idHash].lockACid = proposedLockACid;
@@ -281,15 +231,11 @@ contract IdentityRegistry {
 
     // ─── View ─────────────────────────────────────────────────────────────────
 
-    function getIdentity(
-        bytes32 idHash
-    ) external view returns (Identity memory) {
+    function getIdentity(bytes32 idHash) external view returns (Identity memory) {
         return identities[idHash];
     }
 
-    function getGuardians(
-        address patient
-    ) external view returns (address[] memory) {
+    function getGuardians(address patient) external view returns (address[] memory) {
         return _guardians[patient];
     }
 
@@ -299,10 +245,7 @@ contract IdentityRegistry {
 
     // ─── Internal ─────────────────────────────────────────────────────────────
 
-    function _isGuardian(
-        address patient,
-        address addr
-    ) internal view returns (bool) {
+    function _isGuardian(address patient, address addr) internal view returns (bool) {
         for (uint i = 0; i < _guardians[patient].length; i++) {
             if (_guardians[patient][i] == addr) return true;
         }

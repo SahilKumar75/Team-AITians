@@ -23,3 +23,9 @@ Patients own their data, encrypted with their private keys. No central database.
 - Smart Contracts: Solidity (Polygon Amoy)
 - Storage: IPFS (via Helia) + IndexedDB (Local Keys)
 - Auth: Argon2id (Slow Hash) + AES-256-GCM (Encryption)
+
+## Status
+
+- Phase 1: Architecture (Complete)
+- Phase 2: Authentication (Complete)
+- Phase 3: Medical Records (Pending)

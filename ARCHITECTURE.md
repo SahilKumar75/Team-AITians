@@ -1,4 +1,4 @@
-# 🏥 Architecture & Implementation Plan
+# 🏥 Swasthya Sanchar — Architecture & Implementation Plan
 
 > **Decentralised Medical Records System**  
 > Patient-sovereign, blockchain-anchored, no third-party auth.

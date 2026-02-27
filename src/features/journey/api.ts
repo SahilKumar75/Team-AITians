@@ -11,6 +11,7 @@ import {
   getJourneyClient,
   getJourneysClient,
   updateJourneyClient,
+  updateJourneyAnyClient,
 } from "@/lib/client-data";
 
 const BASE = typeof window !== "undefined" ? "" : process.env.NEXTAUTH_URL ?? "";
@@ -84,3 +85,23 @@ export async function updateJourney(
   if (!res.ok) throw new Error(data.error ?? "Failed to update journey");
   return data;
 }
+
+export async function updateJourneyAny(
+  journeyId: string,
+  patch: Partial<JourneyApiResponse>
+): Promise<{ journey: JourneyApiResponse }> {
+  if (typeof window !== "undefined") {
+    const out = await updateJourneyAnyClient(journeyId, patch);
+    if (!out) throw new Error("Journey not found");
+    return out as { journey: JourneyApiResponse };
+  }
+  const res = await fetch(`${BASE}/api/journey/${journeyId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to update journey");
+  return data;
+}
+
