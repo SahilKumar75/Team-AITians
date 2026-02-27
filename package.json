@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "npm run i18n:audit && next build",
+    "build": "node scripts/build.mjs",
     "start": "next start",
     "lint": "next lint",
     "i18n:audit": "node scripts/i18n-audit.mjs",
