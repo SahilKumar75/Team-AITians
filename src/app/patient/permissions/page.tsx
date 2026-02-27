@@ -36,11 +36,6 @@ export default function DoctorPermissionsPage() {
   const [isGrantModalOpen, setIsGrantModalOpen] = useState(false);
   const loadSeqRef = useRef(0);
 
-  const READ_TIMEOUT_MS = Math.max(
-    3000,
-    Number(process.env.NEXT_PUBLIC_UI_READ_TIMEOUT_MS || 12000)
-  );
-
   async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
@@ -53,6 +48,21 @@ export default function DoctorPermissionsPage() {
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  function asNonEmptyString(value: unknown): string {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function isGenericDoctorText(value: string): boolean {
+    const v = value.trim().toLowerCase();
+    return !v || v === "doctor" || v === "dr" || v === "dr.";
+  }
+
+  function toDoctorDisplayName(value: string): string {
+    const v = value.trim();
+    if (!v) return "";
+    return /^dr\.?\s+/i.test(v) ? v : `Dr. ${v}`;
   }
 
   useEffect(() => {
@@ -80,34 +90,41 @@ export default function DoctorPermissionsPage() {
 
     if (seq === loadSeqRef.current) setLoading(true);
     try {
-      let onChain = await withTimeout(
-        getAccessGrantsForPatient(addr, { forceRefresh }),
-        READ_TIMEOUT_MS,
-        [] as Awaited<ReturnType<typeof getAccessGrantsForPatient>>
-      );
-      // Immediately after grant tx, some RPC nodes may lag one block.
-      // Retry once with a forced read to avoid showing a false empty state.
-      if (!forceRefresh && onChain.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        onChain = await withTimeout(
-          getAccessGrantsForPatient(addr, { forceRefresh: true }),
-          READ_TIMEOUT_MS,
-          [] as Awaited<ReturnType<typeof getAccessGrantsForPatient>>
-        );
-      }
-
-      // Filter out self-grants (patient's own wallet from upload self-grant)
+      const qs = new URLSearchParams({
+        patientAddress: addr,
+        ...(forceRefresh ? { forceRefresh: "1" } : {}),
+      }).toString();
+      const res = await fetch(`/api/patient/permissions?${qs}`, {
+        cache: "no-store",
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        permissions?: Array<{
+          doctorAddress: string;
+          recordIds: string[];
+          encDekIpfsCid: string;
+          doctorName?: string;
+          specialization?: string;
+          hospital?: string;
+        }>;
+      };
+      const permissionRows = Array.isArray(json.permissions) ? json.permissions : [];
       const patientAddr = addr.toLowerCase();
-      onChain = onChain.filter((g) => g.doctorAddress.toLowerCase() !== patientAddr);
-
+      const rows = permissionRows.filter((p) => (p.doctorAddress || "").toLowerCase() !== patientAddr);
       const baseMap = new Map<string, GrantEntry>();
-      onChain.forEach((grant) => {
-        const docAddr = grant.doctorAddress.toLowerCase();
+      rows.forEach((grant) => {
+        const docAddr = (grant.doctorAddress || "").toLowerCase();
+        if (!docAddr) return;
+        const apiName = asNonEmptyString(grant.doctorName);
+        const apiSpecialization = asNonEmptyString(grant.specialization);
+        const apiHospital = asNonEmptyString(grant.hospital);
         baseMap.set(docAddr, {
           doctorAddress: grant.doctorAddress,
-          doctorName: `${tx("Doctor")} (${grant.doctorAddress.slice(0, 6)}…${grant.doctorAddress.slice(-4)})`,
-          specialization: tx("General Physician"),
-          hospital: tx("Verified on Chain"),
+          doctorName: !isGenericDoctorText(apiName)
+            ? toDoctorDisplayName(apiName)
+            : `${tx("Doctor")} (${grant.doctorAddress.slice(0, 6)}…${grant.doctorAddress.slice(-4)})`,
+          specialization: !isGenericDoctorText(apiSpecialization) ? apiSpecialization : tx("General Physician"),
+          hospital: apiHospital || tx("Verified on Chain"),
           grantedAt: new Date().toISOString(),
           txHash: "on-chain",
         });
@@ -120,19 +137,17 @@ export default function DoctorPermissionsPage() {
       // Enrich names/specialization/hospital in background; don't block page render.
       void (async () => {
         const doctors = await Promise.allSettled(
-          onChain.map(async (grant) => ({
+          rows.map(async (grant) => ({
             grant,
             identity: await withTimeout(fetchIdentityByWallet(grant.doctorAddress), 4500, null),
           }))
         );
 
         const resolved = doctors
-          .filter((d): d is PromiseFulfilledResult<{ grant: (typeof onChain)[number]; identity: Awaited<ReturnType<typeof fetchIdentityByWallet>> }> => d.status === "fulfilled")
+          .filter((d): d is PromiseFulfilledResult<{ grant: (typeof rows)[number]; identity: Awaited<ReturnType<typeof fetchIdentityByWallet>> }> => d.status === "fulfilled")
           .map((d) => d.value);
 
-        const walletsNeedingName = resolved
-          .filter(({ identity }) => !identity?.title)
-          .map(({ grant }) => grant.doctorAddress);
+        const walletsNeedingName = resolved.map(({ grant }) => grant.doctorAddress);
 
         const subgraphDoctors = walletsNeedingName.length > 0
           ? await withTimeout(listDoctorsByWalletsFromSubgraph(walletsNeedingName), 4500, [])
@@ -142,23 +157,73 @@ export default function DoctorPermissionsPage() {
         );
 
         const enrichedMap = new Map<string, GrantEntry>(baseMap);
-        resolved.forEach(({ grant, identity }) => {
-          const docAddr = grant.doctorAddress.toLowerCase();
-          const subDoc = subgraphNameMap.get(docAddr);
-          const doctorName = identity?.title
-            ? `Dr. ${identity.title}`
-            : subDoc?.name
-              ? `Dr. ${subDoc.name}`
-              : `${tx("Doctor")} (${grant.doctorAddress.slice(0, 6)}…${grant.doctorAddress.slice(-4)})`;
-          const specialization = identity?.role || subDoc?.specialization || tx("General Physician");
-          enrichedMap.set(docAddr, {
-            doctorAddress: grant.doctorAddress,
-            doctorName,
-            specialization,
-            hospital: subDoc?.hospital || tx("Verified on Chain"),
-            grantedAt: new Date().toISOString(),
-            txHash: "on-chain",
-          });
+        const enrichedRows = await Promise.all(
+          resolved.map(async ({ grant, identity }) => {
+            const fallbackName = `${tx("Doctor")} (${grant.doctorAddress.slice(0, 6)}…${grant.doctorAddress.slice(-4)})`;
+            const fallbackSpecialization = tx("General Physician");
+            const docAddr = grant.doctorAddress.toLowerCase();
+            const subDoc = subgraphNameMap.get(docAddr);
+
+            const subgraphName = asNonEmptyString(subDoc?.name);
+            const identityTitle = asNonEmptyString(identity?.title);
+            const apiName = asNonEmptyString(grant.doctorName);
+            const apiSpecialization = asNonEmptyString(grant.specialization);
+            const apiHospital = asNonEmptyString(grant.hospital);
+
+            let chosenName = "";
+            if (!isGenericDoctorText(apiName)) {
+              chosenName = apiName;
+            } else if (!isGenericDoctorText(subgraphName)) {
+              chosenName = subgraphName;
+            } else if (!isGenericDoctorText(identityTitle)) {
+              chosenName = identityTitle;
+            }
+
+            // Last fallback for name: read fullName from doctor's profile payload.
+            if (!chosenName && identity?.lockACid) {
+              try {
+                const lockPayload = await withTimeout(fetchJSONFromIPFS(identity.lockACid), 3500, null as unknown);
+                const lockObj = (lockPayload && typeof lockPayload === "object") ? (lockPayload as Record<string, unknown>) : null;
+                const profileCid = asNonEmptyString(lockObj?.profileCid);
+                if (profileCid) {
+                  const profileRaw = await withTimeout(fetchJSONFromIPFS(profileCid), 3500, null as unknown);
+                  const profileObj = (profileRaw && typeof profileRaw === "object") ? (profileRaw as Record<string, unknown>) : null;
+                  const profile = (profileObj?.profile && typeof profileObj.profile === "object")
+                    ? (profileObj.profile as Record<string, unknown>)
+                    : profileObj;
+                  const profileName = asNonEmptyString(profile?.fullName) || asNonEmptyString(profile?.name);
+                  if (!isGenericDoctorText(profileName)) {
+                    chosenName = profileName;
+                  }
+                }
+              } catch {
+                // Non-blocking enrichment path: ignore profile fetch failures.
+              }
+            }
+
+            const doctorName = chosenName ? toDoctorDisplayName(chosenName) : fallbackName;
+            const specialization = !isGenericDoctorText(apiSpecialization)
+              ? apiSpecialization
+              : !isGenericDoctorText(asNonEmptyString(subDoc?.specialization))
+              ? asNonEmptyString(subDoc?.specialization)
+              : (!isGenericDoctorText(identityTitle) ? identityTitle : fallbackSpecialization);
+
+            return {
+              docAddr,
+              entry: {
+                doctorAddress: grant.doctorAddress,
+                doctorName,
+                specialization,
+                hospital: apiHospital || subDoc?.hospital || tx("Verified on Chain"),
+                grantedAt: new Date().toISOString(),
+                txHash: "on-chain",
+              } as GrantEntry,
+            };
+          })
+        );
+
+        enrichedRows.forEach(({ docAddr, entry }) => {
+          enrichedMap.set(docAddr, entry);
         });
 
         if (seq === loadSeqRef.current) {
@@ -223,7 +288,7 @@ export default function DoctorPermissionsPage() {
     }
   };
 
-  if (status === "loading" || loading) {
+  if (status === "loading") {
     return (
       <div className="min-h-screen bg-white dark:bg-neutral-900 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -254,7 +319,14 @@ export default function DoctorPermissionsPage() {
           </button>
         </div>
 
-        {permissions.length === 0 ? (
+        {loading && permissions.length === 0 ? (
+          <div className="bg-neutral-50 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700 p-12 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-4" />
+            <p className="text-neutral-600 dark:text-neutral-400">
+              {tx("Loading doctor access permissions...")}
+            </p>
+          </div>
+        ) : permissions.length === 0 ? (
           <div className="bg-neutral-50 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700 p-12 text-center">
             <Users className="w-16 h-16 text-neutral-400 dark:text-neutral-600 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50 mb-2">
@@ -332,7 +404,7 @@ export default function DoctorPermissionsPage() {
       <GrantAccessModal
         isOpen={isGrantModalOpen}
         onClose={() => setIsGrantModalOpen(false)}
-        onGrantSuccess={() => loadPermissions(true)}
+        onGrantSuccess={() => loadPermissions()}
       />
     </div>
   );

@@ -24,6 +24,14 @@ interface Checkpoint {
     floor: number;
     wing?: string;
   };
+  notes?: string;
+  orders?: Array<{
+    orderId?: string;
+    testType?: string;
+    status?: "pending" | "done";
+    doneAt?: string;
+    expectedReadyAt?: number;
+  }>;
   arrivedAt?: string;
   startedAt?: string;
   completedAt?: string;
@@ -279,6 +287,35 @@ export default function StaffJourneyPage({ params }: { params: { id: string } })
                               Completed: {new Date(checkpoint.completedAt).toLocaleTimeString()}
                             </span>
                           )}
+                        </div>
+                      )}
+
+                      {checkpoint.orders && checkpoint.orders.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900/40 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300 mb-2">
+                            Test Orders
+                          </p>
+                          <ul className="space-y-2">
+                            {checkpoint.orders.map((order, idx) => (
+                              <li
+                                key={order.orderId || `${checkpoint.id}-order-${idx}`}
+                                className="flex items-center justify-between gap-2 text-sm"
+                              >
+                                <span className={order.status === "done" ? "line-through text-neutral-500" : "text-neutral-800 dark:text-neutral-100"}>
+                                  {order.testType || "Diagnostic test"}
+                                </span>
+                                {order.status === "done" ? (
+                                  <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                                    Done {order.doneAt ? new Date(order.doneAt).toLocaleString("en-IN") : ""}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                                    Pending
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
                     </div>

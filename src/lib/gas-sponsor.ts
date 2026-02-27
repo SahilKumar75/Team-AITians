@@ -1,6 +1,8 @@
 import { ethers, Signer } from "ethers";
 
-const MIN_UPLOAD_GAS_BALANCE = ethers.parseEther("0.015");
+const DEFAULT_MIN_UPLOAD_GAS_BALANCE = ethers.parseEther(
+  process.env.NEXT_PUBLIC_MIN_UPLOAD_GAS_BALANCE_POL || "0.05"
+);
 
 type FundWalletResponse = {
   success?: boolean;
@@ -16,23 +18,37 @@ type FundWalletResponse = {
  * If low, asks server sponsor endpoint to top up the same wallet.
  */
 export async function ensureUploadGasBalance(
-  signer: Signer
+  signer: Signer,
+  opts?: { minRequiredPol?: string }
 ): Promise<{ address: string; before: bigint; after: bigint; toppedUp: boolean }> {
   const provider = signer.provider;
   if (!provider) {
     throw new Error("Wallet provider unavailable for balance check.");
   }
 
+  let minRequired = DEFAULT_MIN_UPLOAD_GAS_BALANCE;
+  if (opts?.minRequiredPol) {
+    try {
+      minRequired = ethers.parseEther(opts.minRequiredPol);
+    } catch {
+      minRequired = DEFAULT_MIN_UPLOAD_GAS_BALANCE;
+    }
+  }
+
   const address = await signer.getAddress();
   const before = await provider.getBalance(address);
-  if (before >= MIN_UPLOAD_GAS_BALANCE) {
+  if (before >= minRequired) {
     return { address, before, after: before, toppedUp: false };
   }
 
   const fundRes = await fetch("/api/auth/fund-wallet", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, minRequired: "0.015" }),
+    body: JSON.stringify({
+      address,
+      minRequired: ethers.formatEther(minRequired),
+      purpose: "upload",
+    }),
   });
 
   const fundJson = (await fundRes.json().catch(() => ({}))) as FundWalletResponse;
@@ -44,14 +60,13 @@ export async function ensureUploadGasBalance(
   }
 
   const after = await provider.getBalance(address);
-  if (after < MIN_UPLOAD_GAS_BALANCE) {
+  if (after < minRequired) {
     throw new Error(
       `Low gas in signer ${address}. Current balance ${ethers.formatEther(
         after
-      )} POL is below required ${ethers.formatEther(MIN_UPLOAD_GAS_BALANCE)} POL.`
+      )} POL is below required ${ethers.formatEther(minRequired)} POL.`
     );
   }
 
   return { address, before, after, toppedUp: true };
 }
-

@@ -131,134 +131,175 @@ export function GrantAccessModal({
     const handleGrant = async (doctor: Doctor) => {
         setGranting(doctor.id);
         setError("");
-
-        const patientAddress = user?.walletAddress;
-        if (!patientAddress) {
-            setError("Not logged in");
-            setGranting(null);
-            return;
-        }
-
-        // ── Blockchain path ─────────────────────────────────────────────────────
-        if (isHealthRegistryConfigured()) {
-            try {
-                const provider = new ethers.JsonRpcProvider(
-                    process.env.NEXT_PUBLIC_POLYGON_RPC_URL ||
-                    "https://rpc-amoy.polygon.technology",
-                    parseInt(process.env.NEXT_PUBLIC_POLYGON_CHAIN_ID || "80002")
+        let shouldRefreshPermissions = false;
+        const fetchManifestWithTimeout = async (cid: string) =>
+            await new Promise<unknown>((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error("Manifest fetch timed out.")), 6000);
+                fetchJSONFromIPFS(cid).then(
+                    (value) => {
+                        clearTimeout(timer);
+                        resolve(value);
+                    },
+                    (err) => {
+                        clearTimeout(timer);
+                        reject(err);
+                    }
                 );
-                const signer = getSigner(provider);
-                if (!signer) {
-                    throw new Error("Wallet not detected. Please unlock MetaMask to sign the permission grant.");
-                }
-                const signerAddress = (await signer.getAddress()).toLowerCase();
-                if (signerAddress !== patientAddress.toLowerCase()) {
-                    throw new Error(
-                        `Wallet mismatch: signed-in patient is ${patientAddress}, but connected wallet is ${signerAddress}. Switch MetaMask to the same patient wallet.`
-                    );
-                }
+            });
 
-                // Ensure signer wallet has enough POL before running multi-record grant tx loop.
-                await ensureUploadGasBalance(signer);
-
-                // Grant access for every active record the patient owns
-                const recordIds = await getPatientRecordIds(patientAddress, { forceRefresh: true });
-                setRecordCount(recordIds.length);
-                if (recordIds.length === 0) {
-                    const short = `${patientAddress.slice(0, 6)}...${patientAddress.slice(-4)}`;
-                    setError(
-                        `No on-chain records found for wallet ${short}. Upload from /patient/records using this same patient account, then grant access.`
-                    );
-                    setGranting(null);
-                    return;
-                } else {
-                    let successCount = 0;
-                    let firstGrantError = "";
-                    let missingManifestCount = 0;
-                    for (const recordId of recordIds) {
-                        try {
-                            // 1. Get existing manifest for patient
-                            const manifestCid = await getRecordDEK(recordId, patientAddress);
-                            if (!manifestCid) {
-                                missingManifestCount += 1;
-                                continue;
-                            }
-
-                            // 2. Fetch and unwrap DEK
-                            const manifest = (await fetchJSONFromIPFS(manifestCid)) as any;
-                            const wrappedForPatient = manifest.keys?.[patientAddress.toLowerCase()];
-                            if (!wrappedForPatient) continue;
-
-                            const dek = await unwrapDEKForUser(wrappedForPatient, patientAddress);
-
-                            // 3. Wrap for doctor
-                            const wrappedForDoctor = await wrapDEKForUser(dek, doctor.walletAddress);
-
-                            // 4. Update manifest
-                            const newManifest = {
-                                ...manifest,
-                                keys: {
-                                    ...manifest.keys,
-                                    [doctor.walletAddress.toLowerCase()]: wrappedForDoctor,
-                                },
-                            };
-                            const newManifestCid = await uploadJSON(newManifest);
-
-                            // 5. Grant on-chain
-                            const result = await grantRecordAccess(
-                                signer,
-                                recordId,
-                                doctor.walletAddress,
-                                newManifestCid,
-                                newManifestCid
-                            );
-                            if (!result.success) {
-                                if (!firstGrantError && result.error) firstGrantError = result.error;
-                                if ((result.error || "").toLowerCase().includes("not yet verified on-chain")) {
-                                    break;
-                                }
-                                console.warn(`Grant failed for record ${recordId}:`, result.error);
-                            } else {
-                                successCount += 1;
-                            }
-                        } catch (err) {
-                            console.error(`Failed to process grant for record ${recordId}:`, err);
-                            if (!firstGrantError) {
-                                firstGrantError = err instanceof Error ? err.message : String(err);
-                            }
-                        }
-                    }
-                    if (successCount === 0) {
-                        if (!firstGrantError && missingManifestCount > 0) {
-                            firstGrantError =
-                                "No DEK manifest found for your existing record(s). Re-upload record(s) from /patient/records, then grant access again.";
-                        }
-                        const reason = firstGrantError || "Unknown grant error";
-                        setError(`Failed to grant access to ${doctor.name}: ${reason}`);
-                        setGranting(null);
-                        return;
-                    }
-                    setSuccess(`Access granted to ${doctor.name} on-chain.`);
-                }
-            } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : String(e);
-                console.warn("Blockchain grant failed:", msg);
-                setError(`On-chain grant failed: ${msg}`);
-                setGranting(null);
+        try {
+            const patientAddress = user?.walletAddress;
+            if (!patientAddress) {
+                setError("Not logged in");
                 return;
             }
-        } else {
-            setError("HealthRegistry is not configured. On-chain grant is unavailable.");
-            setGranting(null);
-            return;
-        }
 
-        setGranting(null);
-        await Promise.resolve(onGrantSuccess());
-        onClose();
-        setSuccess("");
-        setDoctors([]);
-        setQuery("");
+            // ── Blockchain path ─────────────────────────────────────────────────────
+            if (isHealthRegistryConfigured()) {
+                try {
+                    const provider = new ethers.JsonRpcProvider(
+                        process.env.NEXT_PUBLIC_POLYGON_RPC_URL ||
+                        "https://rpc-amoy.polygon.technology",
+                        parseInt(process.env.NEXT_PUBLIC_POLYGON_CHAIN_ID || "80002")
+                    );
+                    const signer = getSigner(provider);
+                    if (!signer) {
+                        throw new Error("Wallet not detected. Please unlock MetaMask to sign the permission grant.");
+                    }
+                    const signerAddress = (await signer.getAddress()).toLowerCase();
+                    if (signerAddress !== patientAddress.toLowerCase()) {
+                        throw new Error(
+                            `Wallet mismatch: signed-in patient is ${patientAddress}, but connected wallet is ${signerAddress}. Switch MetaMask to the same patient wallet.`
+                        );
+                    }
+
+                    // Ensure signer wallet has enough POL before running multi-record grant tx loop.
+                    await ensureUploadGasBalance(signer);
+
+                    // Grant access for every active record the patient owns
+                    const recordIds = await getPatientRecordIds(patientAddress, { forceRefresh: true });
+                    setRecordCount(recordIds.length);
+                    if (recordIds.length === 0) {
+                        const short = `${patientAddress.slice(0, 6)}...${patientAddress.slice(-4)}`;
+                        setError(
+                            `No on-chain records found for wallet ${short}. Upload from /patient/records using this same patient account, then grant access.`
+                        );
+                        return;
+                    } else {
+                        let successCount = 0;
+                        let firstGrantError = "";
+                        let missingManifestCount = 0;
+                        for (const recordId of recordIds) {
+                            try {
+                                // 1. Get existing manifest for patient
+                                const manifestCid = await getRecordDEK(recordId, patientAddress);
+                                if (!manifestCid) {
+                                    missingManifestCount += 1;
+                                    continue;
+                                }
+
+                                // 2. Fetch and unwrap DEK
+                                let manifest: any;
+                                try {
+                                    manifest = (await fetchManifestWithTimeout(manifestCid)) as any;
+                                } catch (manifestErr) {
+                                    missingManifestCount += 1;
+                                    if (!firstGrantError) {
+                                        firstGrantError =
+                                            manifestErr instanceof Error ? manifestErr.message : "Manifest fetch failed";
+                                    }
+                                    continue;
+                                }
+                                const wrappedForPatient = manifest.keys?.[patientAddress.toLowerCase()];
+                                if (!wrappedForPatient) continue;
+
+                                const dek = await unwrapDEKForUser(wrappedForPatient, patientAddress);
+
+                                // 3. Wrap for doctor
+                                const wrappedForDoctor = await wrapDEKForUser(dek, doctor.walletAddress);
+
+                                // 4. Update manifest
+                                const doctorWalletKey = doctor.walletAddress.toLowerCase();
+                                const existingDoctors =
+                                    manifest.doctors && typeof manifest.doctors === "object"
+                                        ? (manifest.doctors as Record<string, unknown>)
+                                        : {};
+                                const newManifest = {
+                                    ...manifest,
+                                    keys: {
+                                        ...manifest.keys,
+                                        [doctorWalletKey]: wrappedForDoctor,
+                                    },
+                                    doctors: {
+                                        ...existingDoctors,
+                                        [doctorWalletKey]: {
+                                            name: doctor.name || "",
+                                            specialization: doctor.specialization || "",
+                                            hospital: doctor.hospital || "",
+                                            updatedAt: new Date().toISOString(),
+                                        },
+                                    },
+                                };
+                                const newManifestCid = await uploadJSON(newManifest);
+
+                                // 5. Grant on-chain
+                                const result = await grantRecordAccess(
+                                    signer,
+                                    recordId,
+                                    doctor.walletAddress,
+                                    newManifestCid,
+                                    newManifestCid
+                                );
+                                if (!result.success) {
+                                    if (!firstGrantError && result.error) firstGrantError = result.error;
+                                    if ((result.error || "").toLowerCase().includes("not yet verified on-chain")) {
+                                        break;
+                                    }
+                                    console.warn(`Grant failed for record ${recordId}:`, result.error);
+                                } else {
+                                    successCount += 1;
+                                }
+                            } catch (err) {
+                                console.error(`Failed to process grant for record ${recordId}:`, err);
+                                if (!firstGrantError) {
+                                    firstGrantError = err instanceof Error ? err.message : String(err);
+                                }
+                            }
+                        }
+                        if (successCount === 0) {
+                            if (!firstGrantError && missingManifestCount > 0) {
+                                firstGrantError =
+                                    "No DEK manifest found for your existing record(s). Re-upload record(s) from /patient/records, then grant access again.";
+                            }
+                            const reason = firstGrantError || "Unknown grant error";
+                            setError(`Failed to grant access to ${doctor.name}: ${reason}`);
+                            return;
+                        }
+                        setSuccess(`Access granted to ${doctor.name} on-chain.`);
+                        shouldRefreshPermissions = true;
+                    }
+                } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.warn("Blockchain grant failed:", msg);
+                    setError(`On-chain grant failed: ${msg}`);
+                    return;
+                }
+            } else {
+                setError("HealthRegistry is not configured. On-chain grant is unavailable.");
+                return;
+            }
+        } finally {
+            setGranting(null);
+            if (shouldRefreshPermissions) {
+                void Promise.resolve(onGrantSuccess());
+            }
+            onClose();
+            setSuccess("");
+            setDoctors([]);
+            setQuery("");
+            router.replace("/patient/permissions");
+            router.refresh();
+        }
     };
 
     const handleUploadFirst = () => {

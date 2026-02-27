@@ -21,6 +21,30 @@ const LOGS_LOOKBACK_BLOCKS = Math.max(
     100,
     Number(process.env.NEXT_PUBLIC_RPC_LOGS_LOOKBACK_BLOCKS || process.env.RPC_LOGS_LOOKBACK_BLOCKS || 300000)
 );
+const ACCESS_EVENTS_LOOKBACK_BLOCKS = Math.max(
+    LOGS_LOOKBACK_BLOCKS,
+    Number(
+        process.env.NEXT_PUBLIC_ACCESS_EVENTS_LOOKBACK_BLOCKS ||
+        process.env.ACCESS_EVENTS_LOOKBACK_BLOCKS ||
+        120000
+    )
+);
+const ACCESS_EVENTS_CHUNK_SIZE = Math.max(
+    100,
+    Number(
+        process.env.NEXT_PUBLIC_ACCESS_EVENTS_CHUNK_SIZE ||
+        process.env.ACCESS_EVENTS_CHUNK_SIZE ||
+        2000
+    )
+);
+const RECENT_UPLOAD_RECONCILE_BLOCKS = Math.max(
+    100,
+    Number(
+        process.env.NEXT_PUBLIC_RECENT_UPLOAD_RECONCILE_BLOCKS ||
+        process.env.RECENT_UPLOAD_RECONCILE_BLOCKS ||
+        5000
+    )
+);
 const HEALTH_REGISTRY_START_BLOCK = Number(
     process.env.NEXT_PUBLIC_HEALTH_REGISTRY_START_BLOCK || process.env.HEALTH_REGISTRY_START_BLOCK || -1
 );
@@ -88,6 +112,8 @@ const patientAccessCache = new Map<string, { expiresAt: number; value: { doctorA
 const doctorGrantedPatientsCache = new Map<string, { expiresAt: number; value: { patient: string; recordId: string; timestamp?: number }[] }>();
 const clinicianVerifiedCache = new Map<string, { expiresAt: number; value: boolean }>();
 const CLINICIAN_VERIFIED_TTL_MS = Math.max(5000, Number(process.env.CLINICIAN_VERIFIED_TTL_MS || 60000));
+const RPC_QUERY_RETRIES = Math.max(0, Number(process.env.RPC_QUERY_RETRIES || 2));
+const RPC_RETRY_BASE_DELAY_MS = Math.max(100, Number(process.env.RPC_RETRY_BASE_DELAY_MS || 300));
 
 // ─── Blockchain Interaction ──────────────────────────────────────────────────
 
@@ -122,6 +148,39 @@ function isTimeoutLikeError(error: unknown): boolean {
         msg.includes("etimedout") ||
         msg.includes("504")
     );
+}
+
+function isNetworkLikeError(error: unknown): boolean {
+    if (!error) return false;
+    const e = error as { code?: number | string; message?: string; error?: { code?: number | string; message?: string } };
+    const codeRaw = e?.error?.code ?? e?.code;
+    const code = typeof codeRaw === "string" ? codeRaw.toUpperCase() : codeRaw;
+    const msg = `${e?.error?.message || ''} ${e?.message || ''}`.toLowerCase();
+    return (
+        code === "EHOSTUNREACH" ||
+        code === "ENETUNREACH" ||
+        code === "ECONNRESET" ||
+        code === "ECONNREFUSED" ||
+        code === "ENOTFOUND" ||
+        msg.includes("socket hang up") ||
+        msg.includes("network error") ||
+        msg.includes("failed to fetch")
+    );
+}
+
+function isRetryableRpcError(error: unknown): boolean {
+    return isTimeoutLikeError(error) || isNetworkLikeError(error);
+}
+
+function rpcErrorCode(error: unknown): string {
+    const e = error as { code?: number | string; error?: { code?: number | string } };
+    const code = e?.error?.code ?? e?.code;
+    if (typeof code === "string" || typeof code === "number") return String(code);
+    return "unknown";
+}
+
+async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseInsufficientFundsMessage(raw: string): string {
@@ -166,16 +225,21 @@ async function queryFilterRangeAdaptive(
     contract: ethers.Contract,
     filter: ReturnType<ethers.Contract["filters"][keyof ethers.Contract["filters"]]>,
     fromBlock: number,
-    toBlock: number
+    toBlock: number,
+    attempt = 0
 ): Promise<ethers.EventLog[]> {
     try {
         return (await contract.queryFilter(filter, fromBlock, toBlock)) as ethers.EventLog[];
     } catch (error) {
+        if (isRetryableRpcError(error) && attempt < RPC_QUERY_RETRIES) {
+            await sleep(RPC_RETRY_BASE_DELAY_MS * (attempt + 1));
+            return queryFilterRangeAdaptive(contract, filter, fromBlock, toBlock, attempt + 1);
+        }
         const span = toBlock - fromBlock;
         if (!isTimeoutLikeError(error) || span <= 1500) throw error;
         const mid = Math.floor((fromBlock + toBlock) / 2);
-        const left = await queryFilterRangeAdaptive(contract, filter, fromBlock, mid);
-        const right = await queryFilterRangeAdaptive(contract, filter, mid + 1, toBlock);
+        const left = await queryFilterRangeAdaptive(contract, filter, fromBlock, mid, 0);
+        const right = await queryFilterRangeAdaptive(contract, filter, mid + 1, toBlock, 0);
         return [...left, ...right];
     }
 }
@@ -191,11 +255,17 @@ async function queryFilterChunked(
     }
 
     const latest = opts?.toBlock ?? (await provider.getBlockNumber());
-    const configuredStart =
-        opts?.fromBlock ??
-        (Number.isFinite(HEALTH_REGISTRY_START_BLOCK) && HEALTH_REGISTRY_START_BLOCK >= 0
-            ? HEALTH_REGISTRY_START_BLOCK
-            : Math.max(0, latest - LOGS_LOOKBACK_BLOCKS));
+    // If fromBlock is explicitly provided, honor it as-is.
+    // Otherwise, default to a bounded recent lookback window.
+    let configuredStart = opts?.fromBlock;
+    if (configuredStart === undefined) {
+        configuredStart = Math.max(0, latest - LOGS_LOOKBACK_BLOCKS);
+        // Allow HEALTH_REGISTRY_START_BLOCK to override if it's more recent.
+        if (Number.isFinite(HEALTH_REGISTRY_START_BLOCK) && HEALTH_REGISTRY_START_BLOCK > configuredStart) {
+            configuredStart = HEALTH_REGISTRY_START_BLOCK;
+        }
+    }
+
     const from = Math.max(0, configuredStart);
     if (from > latest) return [];
 
@@ -208,7 +278,11 @@ async function queryFilterChunked(
         try {
             part = await queryFilterRangeAdaptive(contract, filter, start, end);
         } catch (error) {
+            console.warn(
+                `[queryFilterChunked] Chunk ${start}-${end} failed (code=${rpcErrorCode(error)}).`
+            );
             if (isEthGetLogsRangeLimitError(error) && chunk > 10) {
+                console.warn(`[queryFilterChunked] Falling back to smaller chunks...`);
                 part = await queryFilterChunked(contract, filter, {
                     fromBlock: start,
                     toBlock: end,
@@ -221,6 +295,28 @@ async function queryFilterChunked(
         out.push(...part);
     }
     return out;
+}
+
+function getAccessEventsFromBlock(latestBlock: number): number {
+    const lookbackStart = Math.max(0, latestBlock - ACCESS_EVENTS_LOOKBACK_BLOCKS);
+    if (!Number.isFinite(HEALTH_REGISTRY_START_BLOCK) || HEALTH_REGISTRY_START_BLOCK < 0) {
+        return lookbackStart;
+    }
+    return Math.max(lookbackStart, Math.floor(HEALTH_REGISTRY_START_BLOCK));
+}
+
+function normalizeRecordFileType(raw: unknown): string {
+    const fileType = typeof raw === "string" ? raw.trim() : "";
+    if (!fileType) return "";
+    if (/^0x[0-9a-fA-F]{64}$/.test(fileType)) {
+        try {
+            const decoded = ethers.decodeBytes32String(fileType).trim();
+            return decoded || fileType;
+        } catch {
+            return fileType;
+        }
+    }
+    return fileType;
 }
 
 /**
@@ -615,38 +711,37 @@ export async function revokeRecordAccess(
  * Returns a deduplicated list of patient addresses + record IDs.
  */
 export async function getGrantedPatientsForDoctor(
-    doctorAddress: string
+    doctorAddress: string,
+    opts?: { forceRefresh?: boolean }
 ): Promise<{ patient: string; recordId: string; timestamp?: number }[]> {
     if (!HEALTH_REGISTRY || !isValidAddress(doctorAddress)) return [];
     if (isBlockedWallet(doctorAddress)) return [];
     const cacheKey = doctorAddress.toLowerCase();
+    const forceRefresh = opts?.forceRefresh === true;
     const now = Date.now();
     const cached = doctorGrantedPatientsCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
+    if (!forceRefresh && cached && cached.expiresAt > now) {
         return cached.value.filter((row) => !isBlockedWallet(row.patient));
     }
+    const subgraphPatients = new Set<string>();
     try {
-        if (hasSubgraphDirectory()) {
+        if (hasSubgraphDirectory() && !forceRefresh) {
             const wallets = await listGrantedPatientWalletsForDoctorFromSubgraph(doctorAddress);
-            const value = wallets
+            wallets
                 .filter((patient) => !isBlockedWallet(patient))
-                .map((patient) => ({
-                    patient,
-                    // UI consumers only need a stable id. Subgraph doesn't currently expose recordId per patient.
-                    recordId: `subgraph-grant-${patient}`,
-                    timestamp: undefined,
-                }));
-            doctorGrantedPatientsCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value });
-            return value;
+                .forEach((patient) => subgraphPatients.add(patient.toLowerCase()));
         }
 
-        const contract = getHealthContract();
+        const provider = getProvider();
+        const latestBlock = await provider.getBlockNumber();
+        const fromBlock = getAccessEventsFromBlock(latestBlock);
+        const contract = getHealthContract(provider);
         // Filters: AccessGranted(recordId, grantee, encDekIpfsCid), AccessRevoked(recordId, grantee)
         const grantFilter = contract.filters.AccessGranted(null, doctorAddress, null);
         const revokeFilter = contract.filters.AccessRevoked(null, doctorAddress);
         const [grantEvents, revokeEvents] = await Promise.all([
-            queryFilterChunked(contract, grantFilter),
-            queryFilterChunked(contract, revokeFilter),
+            queryFilterChunked(contract, grantFilter, { fromBlock, chunkSize: ACCESS_EVENTS_CHUNK_SIZE }),
+            queryFilterChunked(contract, revokeFilter, { fromBlock, chunkSize: ACCESS_EVENTS_CHUNK_SIZE }),
         ]);
 
         const latestByRecord = new Map<string, { granted: boolean; blockNumber: number; logIndex: number }>();
@@ -688,10 +783,31 @@ export async function getGrantedPatientsForDoctor(
                 // record may have been deactivated — skip
             }
         }
+        subgraphPatients.forEach((patient) => {
+            if (!patient || seen.has(patient) || isBlockedWallet(patient)) return;
+            seen.add(patient);
+            results.push({
+                patient,
+                // UI consumers only need a stable id when source is subgraph-only.
+                recordId: `subgraph-grant-${patient}`,
+                timestamp: undefined,
+            });
+        });
         doctorGrantedPatientsCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value: results });
         return results;
     } catch (e) {
         console.error('getGrantedPatientsForDoctor error:', e);
+        if (subgraphPatients.size > 0) {
+            const fallback = Array.from(subgraphPatients)
+                .filter((patient) => !isBlockedWallet(patient))
+                .map((patient) => ({
+                    patient,
+                    recordId: `subgraph-grant-${patient}`,
+                    timestamp: undefined,
+                }));
+            doctorGrantedPatientsCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value: fallback });
+            return fallback;
+        }
         return [];
     }
 }
@@ -727,6 +843,21 @@ export async function getRecordDEK(
 }
 
 /**
+ * Get the latest access manifest CID pointer for a patient.
+ * This is a cheap single contract read and useful as a fast permissions hint.
+ */
+export async function getAccessManifestCidForPatient(patientAddress: string): Promise<string> {
+    if (!HEALTH_REGISTRY || !isValidAddress(patientAddress)) return "";
+    try {
+        const contract = getHealthContract();
+        const cid = await contract.accessManifestCid(patientAddress);
+        return typeof cid === "string" ? cid.trim() : "";
+    } catch {
+        return "";
+    }
+}
+
+/**
  * Get all doctors who have been granted access by this patient.
  * Queries AccessGranted events for all records owned by the patient.
  */
@@ -743,39 +874,34 @@ export async function getAccessGrantsForPatient(
     if (!forceRefresh && cached && cached.expiresAt > now) {
         return cached.value.filter((row) => !isBlockedWallet(row.doctorAddress));
     }
+    const merged = new Map<string, { doctorAddress: string; recordId: string; encDekIpfsCid: string }>();
     try {
-        if (hasSubgraphDirectory()) {
+        if (hasSubgraphDirectory() && !forceRefresh) {
             const fromSubgraph = await listAccessGrantsForPatientFromSubgraph(patientAddress);
-            // Only trust subgraph when it actually returned data.
-            // An empty result could mean the grants haven't been indexed yet — fall through to chain scan.
-            if (fromSubgraph.length > 0) {
-                const dedup = new Map<string, { doctorAddress: string; recordId: string; encDekIpfsCid: string }>();
-                fromSubgraph.forEach((row) => {
-                    if (!isValidAddress(row.doctorAddress)) return;
-                    if (isBlockedWallet(row.doctorAddress)) return;
-                    const key = `${row.recordId.toLowerCase()}|${row.doctorAddress.toLowerCase()}`;
-                    dedup.set(key, {
-                        doctorAddress: row.doctorAddress.toLowerCase(),
-                        recordId: row.recordId,
-                        encDekIpfsCid: row.encDekIpfsCid,
-                    });
+            fromSubgraph.forEach((row) => {
+                if (!isValidAddress(row.doctorAddress)) return;
+                if (isBlockedWallet(row.doctorAddress)) return;
+                const key = `${row.recordId.toLowerCase()}|${row.doctorAddress.toLowerCase()}`;
+                merged.set(key, {
+                    doctorAddress: row.doctorAddress.toLowerCase(),
+                    recordId: row.recordId,
+                    encDekIpfsCid: row.encDekIpfsCid,
                 });
-                const value = Array.from(dedup.values());
-                patientAccessCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value });
-                return value;
-            }
+            });
         }
 
         const recordIds = await getPatientRecordIds(patientAddress, { forceRefresh });
-        const contract = getHealthContract();
-        const results: { doctorAddress: string; recordId: string; encDekIpfsCid: string }[] = [];
+        const provider = getProvider();
+        const latestBlock = await provider.getBlockNumber();
+        const fromBlock = getAccessEventsFromBlock(latestBlock);
+        const contract = getHealthContract(provider);
 
         for (const rid of recordIds) {
             const grantFilter = contract.filters.AccessGranted(rid, null, null);
             const revokeFilter = contract.filters.AccessRevoked(rid, null);
             const [grantEvents, revokeEvents] = await Promise.all([
-                queryFilterChunked(contract, grantFilter),
-                queryFilterChunked(contract, revokeFilter),
+                queryFilterChunked(contract, grantFilter, { fromBlock, chunkSize: ACCESS_EVENTS_CHUNK_SIZE }),
+                queryFilterChunked(contract, revokeFilter, { fromBlock, chunkSize: ACCESS_EVENTS_CHUNK_SIZE }),
             ]);
 
             const latestByDoctor = new Map<string, {
@@ -831,19 +957,32 @@ export async function getAccessGrantsForPatient(
             });
 
             latestByDoctor.forEach((meta, doctorAddress) => {
-                if (!meta.granted) return;
-                if (isBlockedWallet(doctorAddress)) return;
-                results.push({
+                const key = `${rid.toLowerCase()}|${doctorAddress.toLowerCase()}`;
+                if (!meta.granted || isBlockedWallet(doctorAddress)) {
+                    merged.delete(key);
+                    return;
+                }
+                merged.set(key, {
                     doctorAddress,
                     recordId: rid,
                     encDekIpfsCid: meta.encDekIpfsCid,
                 });
             });
         }
-        patientAccessCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value: results });
-        return results;
+        const value = Array.from(merged.values());
+        patientAccessCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value });
+        return value;
     } catch (e) {
-        console.error('getAccessGrantsForPatient error:', e);
+        if (isRetryableRpcError(e)) {
+            console.warn(`getAccessGrantsForPatient: RPC temporarily unavailable (code=${rpcErrorCode(e)}).`);
+        } else {
+            console.error('getAccessGrantsForPatient error:', e);
+        }
+        const fallback = Array.from(merged.values());
+        if (fallback.length > 0) {
+            patientAccessCache.set(cacheKey, { expiresAt: Date.now() + ACCESS_CACHE_TTL_MS, value: fallback });
+            return fallback;
+        }
         return [];
     }
 }
@@ -1022,34 +1161,79 @@ export async function addRecordOnChain(
 export async function getRecordsUploadedByDoctor(
     doctorAddress: string
 ): Promise<{ recordId: string; patient: string; fileCid: string; fileType: string; timestamp: number }[]> {
-    if (!HEALTH_REGISTRY) return [];
-    try {
-        if (hasSubgraphDirectory()) {
-            return await listRecordsUploadedByDoctorFromSubgraph(doctorAddress);
+    type UploadedRow = { recordId: string; patient: string; fileCid: string; fileType: string; timestamp: number };
+    const mergeRows = (...groups: UploadedRow[][]): UploadedRow[] => {
+        const merged = new Map<string, UploadedRow>();
+        for (const group of groups) {
+            for (const row of group) {
+                const id = (row.recordId || "").trim().toLowerCase();
+                if (!id) continue;
+                merged.set(id, {
+                    recordId: (row.recordId || "").trim(),
+                    patient: (row.patient || "").trim().toLowerCase(),
+                    fileCid: (row.fileCid || "").trim(),
+                    fileType: normalizeRecordFileType(row.fileType),
+                    timestamp: Number(row.timestamp || 0),
+                });
+            }
         }
+        return Array.from(merged.values()).sort((a, b) => b.timestamp - a.timestamp);
+    };
 
+    const loadFromChain = async (
+        opts?: { fromBlock?: number; toBlock?: number }
+    ): Promise<UploadedRow[]> => {
         const contract = getHealthContract();
         const filter = contract.filters.RecordAdded(null, null, doctorAddress, null);
-        const events = await queryFilterChunked(contract, filter);
-        const results: { recordId: string; patient: string; fileCid: string; fileType: string; timestamp: number }[] = [];
+        const events = await queryFilterChunked(contract, filter, opts);
+        const results: UploadedRow[] = [];
         for (const ev of events) {
             if (!("args" in ev)) continue;
-            const recordId = ev.args[0];
-            const patient = ev.args[1];
-            const fileCid = ev.args[3];
-            // Fetch full record to get fileType
+            const recordId = String(ev.args[0] || "");
+            const patient = String(ev.args[1] || "");
+            const fileCid = String(ev.args[3] || "");
+            if (!recordId || !patient || !fileCid) continue;
+            // Fetch full record to resolve normalized category and canonical timestamp.
             try {
                 const rec = await contract.getRecord(recordId);
                 results.push({
                     recordId,
                     patient,
                     fileCid,
-                    fileType: rec.fileType ? ethers.decodeBytes32String(rec.fileType) : '',
-                    timestamp: Number(rec.timestamp ?? 0),
+                    fileType: normalizeRecordFileType(rec.fileType),
+                    timestamp: Number(rec.timestamp ?? ev.blockNumber ?? 0),
                 });
-            } catch { /* record deactivated */ }
+            } catch {
+                // record may have been deactivated — skip
+            }
         }
         return results;
+    };
+
+    if (!HEALTH_REGISTRY) return [];
+    try {
+        if (hasSubgraphDirectory()) {
+            const subgraphRows = (await listRecordsUploadedByDoctorFromSubgraph(doctorAddress)).map((row) => ({
+                ...row,
+                fileType: normalizeRecordFileType(row.fileType),
+            }));
+            try {
+                // Reconcile latest on-chain writes so newly uploaded records appear immediately.
+                const latest = await getProvider().getBlockNumber();
+                const recentFromBlock = Math.max(0, latest - RECENT_UPLOAD_RECONCILE_BLOCKS);
+                const recentChainRows = await loadFromChain({ fromBlock: recentFromBlock, toBlock: latest });
+                const merged = mergeRows(subgraphRows, recentChainRows);
+                if (merged.length > 0) return merged;
+            } catch (reconcileError) {
+                console.warn('getRecordsUploadedByDoctor reconcile error:', reconcileError);
+            }
+            if (subgraphRows.length > 0) {
+                return mergeRows(subgraphRows);
+            }
+        }
+
+        const chainRows = await loadFromChain();
+        return mergeRows(chainRows);
     } catch (e) {
         console.error('getRecordsUploadedByDoctor error:', e);
         return [];

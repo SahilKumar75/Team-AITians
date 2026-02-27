@@ -8,7 +8,7 @@ import {
   Navigation, AlertCircle, Loader2, RefreshCw
 } from "lucide-react";
 import { useAuthSession } from "@/contexts/AuthContext";
-import { getJourney } from "@/features/journey/api";
+import { getJourney, updateJourneyAny } from "@/features/journey/api";
 import { readFamilyJourneySharePayload } from "@/lib/journey-share-client";
 
 interface Department {
@@ -44,6 +44,7 @@ interface Checkpoint {
     testType: string;
     departmentId: string;
     status: "pending" | "done";
+    doneAt?: string;
   }>;
 }
 
@@ -154,9 +155,38 @@ export function JourneyTracker({
 
   const normalizeJourney = (input: Journey): Journey => {
     const current = input.currentCheckpoint
-      ?? input.checkpoints.find((c) => c.id === input.currentCheckpointId)
       ?? input.checkpoints.find((c) => c.status === "in_queue" || c.status === "in_progress");
     return { ...input, currentCheckpoint: current };
+  };
+
+  const markOrderDone = async (checkpointId: string, orderId: string) => {
+    if (!journey || publicView) return;
+    try {
+      const updatedCheckpoints = journey.checkpoints.map(cp => {
+        if (cp.id !== checkpointId) return cp;
+        return {
+          ...cp,
+          orders: (cp.orders || []).map((o) =>
+            o.orderId === orderId
+              ? { ...o, status: 'done' as const, doneAt: o.doneAt || new Date().toISOString() }
+              : o
+          )
+        };
+      });
+
+      await updateJourneyAny(journey.id, { checkpoints: updatedCheckpoints as unknown[] });
+
+      // Update local state immediately
+      setJourney(prev => {
+        if (!prev) return prev;
+        return normalizeJourney({
+          ...prev,
+          checkpoints: updatedCheckpoints
+        });
+      });
+    } catch (err) {
+      console.error("Failed to mark order as done", err);
+    }
   };
 
   const fetchJourney = async () => {
@@ -489,9 +519,26 @@ export function JourneyTracker({
                       {checkpoint.orders && checkpoint.orders.length > 0 && (
                         <div className="mt-2 text-sm text-neutral-700 dark:text-neutral-300 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800/30">
                           <span className="font-semibold block mb-1">Test Orders:</span>
-                          <ul className="list-disc list-inside">
+                          <ul className="space-y-1">
                             {checkpoint.orders.map((o: any) => (
-                              <li key={o.orderId}>{o.testType}</li>
+                              <li key={o.orderId} className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-neutral-800 p-1.5 rounded border border-neutral-100 dark:border-neutral-700">
+                                <span className={o.status === 'done' ? 'line-through opacity-70' : ''}>
+                                  {o.testType} {o.status === 'done' && '✓'}
+                                  {o.status === 'done' && o.doneAt && (
+                                    <span className="ml-2 text-xs text-emerald-600 dark:text-emerald-400 no-underline opacity-100">
+                                      ({new Date(o.doneAt).toLocaleString("en-IN")})
+                                    </span>
+                                  )}
+                                </span>
+                                {o.status === 'pending' && !publicView && session?.user?.role !== 'patient' && (
+                                  <button
+                                    onClick={() => markOrderDone(checkpoint.id, o.orderId)}
+                                    className="px-2 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                                  >
+                                    Mark Done
+                                  </button>
+                                )}
+                              </li>
                             ))}
                           </ul>
                         </div>

@@ -277,6 +277,7 @@ export interface Order {
     expectedReadyAt?: number;
     queueToken?: number;
     status: 'pending' | 'done';
+    doneAt?: string;
     recordId?: string;
 }
 

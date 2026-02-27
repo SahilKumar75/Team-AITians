@@ -26,6 +26,7 @@ type JourneyLike = {
       status?: string;
       expectedReadyAt?: number;
       recordId?: string;
+      doneAt?: string;
     }>;
   }>;
 };
@@ -88,12 +89,22 @@ export default function PatientTimelinePage() {
           if (statusText === "pending" && order.expectedReadyAt && order.expectedReadyAt < Date.now()) {
             statusText = "overdue";
           }
+          const orderedWhen = cpTime + idx;
           out.push({
             id: `${journey.id}-${cp.id}-order-${order.orderId || idx}`,
-            when: cpTime + idx,
+            when: orderedWhen,
             title: `Test ordered: ${order.testType || "Diagnostic test"}`,
             subtitle: `Status: ${statusText} • Expected: ${eta}`,
           });
+          if (order.status === "done") {
+            const doneTs = order.doneAt ? new Date(order.doneAt).getTime() : orderedWhen + 1;
+            out.push({
+              id: `${journey.id}-${cp.id}-order-done-${order.orderId || idx}`,
+              when: doneTs,
+              title: `Test completed: ${order.testType || "Diagnostic test"}`,
+              subtitle: `Completed ${order.doneAt ? new Date(order.doneAt).toLocaleString("en-IN") : "just now"}`,
+            });
+          }
         });
       });
     });

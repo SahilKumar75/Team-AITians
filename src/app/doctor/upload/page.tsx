@@ -12,12 +12,13 @@ import {
     addRecordOnChain,
     getRecordsUploadedByDoctor,
     getProvider,
-    getRecordMetadata,
+    fetchIdentityByWallet,
     doctorGrantRecordAccess,
 } from "@/lib/blockchain";
 import { generateDEK, encryptFile, wrapDEKForUser } from "@/lib/record-crypto";
-import { uploadToIPFS, uploadJSON } from "@/lib/ipfs";
+import { fetchJSONFromIPFS, uploadToIPFS, uploadJSON } from "@/lib/ipfs";
 import { ensureUploadGasBalance } from "@/lib/gas-sponsor";
+import { ethers } from "ethers";
 
 interface Patient {
     address: string;
@@ -33,6 +34,9 @@ interface UploadedRecord {
     timestamp: number;
 }
 
+const MIN_UPLOAD_START_GAS_POL = "0.09";
+const MIN_UPLOAD_GRANT_GAS_POL = "0.05";
+
 function DoctorUploadContent() {
     const { data: session, status } = useAuthSession();
     const { getSigner } = useAuth();
@@ -44,6 +48,7 @@ function DoctorUploadContent() {
     const [uploadStep, setUploadStep] = useState("");
     const [patients, setPatients] = useState<Patient[]>([]);
     const [patientsLoaded, setPatientsLoaded] = useState(false);
+    const [patientNamesByWallet, setPatientNamesByWallet] = useState<Record<string, string>>({});
     const [uploadHistory, setUploadHistory] = useState<UploadedRecord[]>([]);
     const [selectedPatient, setSelectedPatient] = useState("");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -53,6 +58,114 @@ function DoctorUploadContent() {
     const [error, setError] = useState("");
     const [txHash, setTxHash] = useState("");
     const hasInitialized = useRef(false);
+
+    function shortWallet(wallet: string): string {
+        return `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
+    }
+
+    async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+            return await Promise.race<T>([
+                promise,
+                new Promise<T>((resolve) => {
+                    timer = setTimeout(() => resolve(fallback), ms);
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    async function resolvePatientNames(wallets: string[]) {
+        const unique = Array.from(
+            new Set(
+                wallets
+                    .map((w) => (typeof w === "string" ? w.trim().toLowerCase() : ""))
+                    .filter((w) => w.startsWith("0x") && w.length === 42)
+            )
+        );
+        if (unique.length === 0) return;
+
+        const nextMap: Record<string, string> = {};
+        await Promise.all(
+            unique.map(async (wallet) => {
+                const existing = patientNamesByWallet[wallet];
+                if (existing) {
+                    nextMap[wallet] = existing;
+                    return;
+                }
+
+                // Fast server-side profile resolver (cached + better gateway fallbacks).
+                try {
+                    const statusRes = await withTimeout(
+                        fetch(`/api/patient/status?wallet=${encodeURIComponent(wallet)}`, { cache: "no-store" }),
+                        3500,
+                        null as unknown as Response
+                    );
+                    if (statusRes && statusRes.ok) {
+                        const statusJson = (await statusRes.json()) as { fullName?: unknown };
+                        if (typeof statusJson.fullName === "string" && statusJson.fullName.trim()) {
+                            nextMap[wallet] = statusJson.fullName.trim();
+                            return;
+                        }
+                    }
+                } catch {
+                    // fallback to direct identity/profile path below
+                }
+
+                const identity = await withTimeout(fetchIdentityByWallet(wallet), 3500, null);
+                if (!identity) return;
+
+                let resolvedName = "";
+                if (identity.lockACid) {
+                    const lockA = await withTimeout(fetchJSONFromIPFS(identity.lockACid), 3000, null as unknown);
+                    const lockObj = lockA && typeof lockA === "object" ? (lockA as Record<string, unknown>) : null;
+                    const profileCid =
+                        lockObj && typeof lockObj.profileCid === "string" ? lockObj.profileCid.trim() : "";
+                    if (profileCid) {
+                        const profileRaw = await withTimeout(fetchJSONFromIPFS(profileCid), 3000, null as unknown);
+                        const profileObj =
+                            profileRaw && typeof profileRaw === "object" ? (profileRaw as Record<string, unknown>) : null;
+                        const profile =
+                            profileObj?.profile && typeof profileObj.profile === "object"
+                                ? (profileObj.profile as Record<string, unknown>)
+                                : profileObj;
+                        if (profile) {
+                            if (typeof profile.fullName === "string" && profile.fullName.trim()) {
+                                resolvedName = profile.fullName.trim();
+                            } else if (typeof profile.name === "string" && profile.name.trim()) {
+                                resolvedName = profile.name.trim();
+                            }
+                        }
+                    }
+                }
+
+                if (!resolvedName && identity.title && identity.title.trim().toLowerCase() !== "patient") {
+                    resolvedName = identity.title.trim();
+                }
+                if (resolvedName) nextMap[wallet] = resolvedName;
+            })
+        );
+
+        if (Object.keys(nextMap).length > 0) {
+            setPatientNamesByWallet((prev) => ({ ...prev, ...nextMap }));
+        }
+    }
+
+    function formatRecordCategory(fileType: string): string {
+        const raw = (fileType || "").trim();
+        if (!raw) return "Medical Record";
+        if (/^0x[0-9a-fA-F]{64}$/.test(raw)) {
+            try {
+                const decoded = ethers.decodeBytes32String(raw).trim();
+                return decoded || "Medical Record";
+            } catch {
+                return "Medical Record";
+            }
+        }
+        return raw;
+    }
 
     // Read patient from query param on mount
     useEffect(() => {
@@ -82,13 +195,15 @@ function DoctorUploadContent() {
         hasInitialized.current = true;
 
         (async () => {
+            let grantedPatients: Array<{ patient: string; recordId: string; timestamp?: number }> = [];
             try {
                 const grants = await getGrantedPatientsForDoctor(walletAddress);
+                grantedPatients = grants;
                 setPatients(
                     grants.map((g) => ({
                         address: g.patient,
                         recordId: g.recordId,
-                        label: `${g.patient.slice(0, 6)}...${g.patient.slice(-4)}`,
+                        label: shortWallet(g.patient),
                     }))
                 );
             } catch (err) {
@@ -100,6 +215,10 @@ function DoctorUploadContent() {
             try {
                 const records = await getRecordsUploadedByDoctor(walletAddress);
                 setUploadHistory(records);
+                await resolvePatientNames([
+                    ...grantedPatients.map((g) => g.patient),
+                    ...records.map((r) => r.patient),
+                ]);
             } catch (err) {
                 console.error("Error loading upload history:", err);
             }
@@ -118,9 +237,10 @@ function DoctorUploadContent() {
                 grants.map((g) => ({
                     address: g.patient,
                     recordId: g.recordId,
-                    label: `${g.patient.slice(0, 6)}...${g.patient.slice(-4)}`,
+                    label: shortWallet(g.patient),
                 }))
             );
+            await resolvePatientNames(grants.map((g) => g.patient));
         } catch (error) {
             console.error("Error loading patients from chain:", error);
         }
@@ -132,6 +252,7 @@ function DoctorUploadContent() {
             if (!session?.user?.walletAddress) return;
             const records = await getRecordsUploadedByDoctor(session.user.walletAddress);
             setUploadHistory(records);
+            await resolvePatientNames(records.map((r) => r.patient));
         } catch (error) {
             console.error("Error loading upload history:", error);
         }
@@ -178,7 +299,7 @@ function DoctorUploadContent() {
             setError("");
             setTxHash("");
 
-            await ensureUploadGasBalance(signer);
+            await ensureUploadGasBalance(signer, { minRequiredPol: MIN_UPLOAD_START_GAS_POL });
 
             // Step 1: Encrypt file with DEK
             setUploadStep("Encrypting file...");
@@ -220,6 +341,7 @@ function DoctorUploadContent() {
 
             // Step 6: Persist manifest CID on-chain via doctorGrantAccess
             setUploadStep("Linking keys to blockchain...");
+            await ensureUploadGasBalance(signer, { minRequiredPol: MIN_UPLOAD_GRANT_GAS_POL });
             // Grant to patient
             const patientGrantRes = await doctorGrantRecordAccess(
                 signer,
@@ -233,6 +355,7 @@ function DoctorUploadContent() {
                 throw new Error(patientGrantRes.error || "Failed to grant record access to patient.");
             }
             // Grant to doctor (so uploader can also decrypt)
+            await ensureUploadGasBalance(signer, { minRequiredPol: MIN_UPLOAD_GRANT_GAS_POL });
             const doctorGrantRes = await doctorGrantRecordAccess(
                 signer,
                 result.recordId!,
@@ -342,13 +465,17 @@ function DoctorUploadContent() {
                                         <option value="">{t.portal.upload.selectPatient || "Choose a patient..."}</option>
                                         {patients.map((patient) => (
                                             <option key={patient.address} value={patient.address}>
-                                                {patient.label}
+                                                {patientNamesByWallet[patient.address.toLowerCase()]
+                                                    ? `${patientNamesByWallet[patient.address.toLowerCase()]} — ${patient.label}`
+                                                    : patient.label}
                                             </option>
                                         ))}
                                         {/* If patient from URL is not yet in the loaded list, show it anyway */}
                                         {selectedPatient && !patients.find(p => p.address.toLowerCase() === selectedPatient.toLowerCase()) && (
                                             <option value={selectedPatient}>
-                                                {selectedPatient.slice(0, 6)}...{selectedPatient.slice(-4)}
+                                                {patientNamesByWallet[selectedPatient.toLowerCase()]
+                                                    ? `${patientNamesByWallet[selectedPatient.toLowerCase()]} — ${shortWallet(selectedPatient)}`
+                                                    : shortWallet(selectedPatient)}
                                             </option>
                                         )}
                                     </select>
@@ -461,30 +588,40 @@ function DoctorUploadContent() {
                                     </div>
                                 ) : (
                                     uploadHistory.map((record) => (
-                                        <div
-                                            key={record.recordId}
-                                            className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition"
-                                        >
-                                            <div className="flex items-start gap-3">
-                                                <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-1" />
-                                                <div className="flex-1">
-                                                    <h4 className="font-medium text-neutral-900 dark:text-neutral-50">
-                                                        {record.fileType || "Medical Record"}
-                                                    </h4>
-                                                    <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
-                                                        Patient: {record.patient.slice(0, 8)}...{record.patient.slice(-6)}
-                                                    </p>
-                                                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono">
-                                                        CID: {record.fileCid.slice(0, 16)}...
-                                                    </p>
-                                                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
-                                                        {record.timestamp > 0
-                                                            ? new Date(record.timestamp * 1000).toLocaleString()
-                                                            : "Pending confirmation"}
-                                                    </p>
+                                        (() => {
+                                            const patientWallet = record.patient.toLowerCase();
+                                            const patientName = patientNamesByWallet[patientWallet];
+                                            const categoryLabel = formatRecordCategory(record.fileType);
+                                            return (
+                                                <div
+                                                    key={record.recordId}
+                                                    className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition"
+                                                >
+                                                    <div className="flex items-start gap-3">
+                                                        <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-1" />
+                                                        <div className="flex-1">
+                                                            <h4 className="font-medium text-neutral-900 dark:text-neutral-50">
+                                                                {categoryLabel}
+                                                            </h4>
+                                                            <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
+                                                                Patient: {patientName ? `${patientName} · ${shortWallet(record.patient)}` : shortWallet(record.patient)}
+                                                            </p>
+                                                            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                                                                Category: {categoryLabel}
+                                                            </p>
+                                                            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono">
+                                                                CID: {record.fileCid.slice(0, 16)}...
+                                                            </p>
+                                                            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+                                                                {record.timestamp > 0
+                                                                    ? new Date(record.timestamp * 1000).toLocaleString()
+                                                                    : "Pending confirmation"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </div>
+                                            );
+                                        })()
                                     ))
                                 )}
                             </div>
