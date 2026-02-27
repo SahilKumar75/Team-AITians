@@ -1,0 +1,59 @@
+specVersion: 1.0.0
+indexerHints:
+  prune: auto
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: IdentityRegistry
+    network: matic-amoy
+    source:
+      address: "0x4e7ef9FbCef612E9ba5c2ed242C5BB8d02Db4201"
+      abi: IdentityRegistry
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - DoctorVerified
+        - EmergencyCidUpdated
+        - GuardianAdded
+        - GuardianRemoved
+        - IdentityRegistered
+        - LockAUpdated
+        - RecoveryCancelled
+        - RecoveryCompleted
+        - RecoveryInitiated
+        - RecoveryVoted
+        - TitleUpdated
+        - VerifierUpdated
+      abis:
+        - name: IdentityRegistry
+          file: ./abis/IdentityRegistry.json
+      eventHandlers:
+        - event: DoctorVerified(indexed address)
+          handler: handleDoctorVerified
+        - event: EmergencyCidUpdated(indexed bytes32,string)
+          handler: handleEmergencyCidUpdated
+        - event: GuardianAdded(indexed address,indexed address)
+          handler: handleGuardianAdded
+        - event: GuardianRemoved(indexed address,indexed address)
+          handler: handleGuardianRemoved
+        - event: IdentityRegistered(indexed bytes32,indexed address,bytes32)
+          handler: handleIdentityRegistered
+        - event: LockAUpdated(indexed bytes32,string)
+          handler: handleLockAUpdated
+        - event: RecoveryCancelled(indexed address)
+          handler: handleRecoveryCancelled
+        - event: RecoveryCompleted(indexed address,string)
+          handler: handleRecoveryCompleted
+        - event: RecoveryInitiated(indexed address,string)
+          handler: handleRecoveryInitiated
+        - event: RecoveryVoted(indexed address,indexed address,uint8)
+          handler: handleRecoveryVoted
+        - event: TitleUpdated(indexed bytes32,string)
+          handler: handleTitleUpdated
+        - event: VerifierUpdated(indexed address)
+          handler: handleVerifierUpdated
+      file: ./src/identity-registry.ts
