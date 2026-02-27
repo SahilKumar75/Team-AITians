@@ -13,6 +13,7 @@ import {
 import QRCode from "qrcode";
 import { isValidPhone } from "@/lib/identifier";
 import { loadUnifiedPatientProfile, saveUnifiedPatientProfile } from "@/lib/patient-data-source";
+import { buildEmergencyUrl } from "@/lib/public-app-url";
 
 interface PatientData {
   name: string;
@@ -116,7 +117,7 @@ export default function PatientPortal() {
 
       const effectiveWallet = merged.walletAddress || wallet;
       if (effectiveWallet) {
-        const emergencyUrl = `${window.location.origin}/emergency/${effectiveWallet}`;
+        const emergencyUrl = buildEmergencyUrl(effectiveWallet);
         const qr = await QRCode.toDataURL(emergencyUrl, { width: 200, margin: 2 });
         setQrCode(qr);
       }
@@ -710,7 +711,7 @@ export default function PatientPortal() {
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-orange-500/10 to-pink-500/10 rounded-full blur-3xl"></div>
 
             <Link
-              href={`/emergency/${walletAddress}`}
+              href={buildEmergencyUrl(walletAddress)}
               target="_blank"
               rel="noopener noreferrer"
               className="absolute top-4 right-4 p-2 rounded-lg bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-white hover:shadow-lg transition-shadow group z-10"
@@ -765,7 +766,7 @@ export default function PatientPortal() {
 
                         <button
                           onClick={() => {
-                            const emergencyUrl = `${window.location.origin}/emergency/${walletAddress}`;
+                            const emergencyUrl = buildEmergencyUrl(walletAddress);
                             navigator.clipboard.writeText(emergencyUrl);
                             alert('Emergency link copied to clipboard!');
                           }}

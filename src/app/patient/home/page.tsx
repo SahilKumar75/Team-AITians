@@ -24,6 +24,7 @@ import type { HealthInsightsContent, HealthInsightsInput } from "@/lib/ai/health
 import { normalizeHealthInsightsPayload } from "@/lib/ai/health-insights";
 import { getJourney, getJourneys } from "@/features/journey/api";
 import { createFamilyJourneyShareLink, type FamilyJourneySharePayload } from "@/lib/journey-share-client";
+import { buildEmergencyUrl } from "@/lib/public-app-url";
 
 interface PatientProfile {
     dateOfBirth?: string;
@@ -137,7 +138,7 @@ export default function PatientHome() {
 
                 if ((profileData.isRegisteredOnChain || profileData.walletAddress) && profileData.walletAddress) {
                     const QRCode = (await import("qrcode")).default;
-                    const emergencyUrl = `${window.location.origin}/emergency/${profileData.walletAddress}`;
+                    const emergencyUrl = buildEmergencyUrl(profileData.walletAddress);
                     const qr = await QRCode.toDataURL(emergencyUrl, { width: 200, margin: 2 });
                     setQrCode(qr);
                 }

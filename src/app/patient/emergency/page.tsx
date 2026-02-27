@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { loadUnifiedPatientProfile } from "@/lib/patient-data-source";
 import { buildEmergencyVCard, encodeEmergencyProfileClient } from "@/lib/zero-net-qr-client";
+import { buildEmergencyUrl } from "@/lib/public-app-url";
 
 interface PatientStatus {
   fullName?: string;
@@ -148,10 +149,7 @@ export default function PatientEmergencyPage() {
     stableIssuedAt,
   ]);
 
-  const emergencyUrl =
-    typeof window !== "undefined" && walletAddress
-      ? `${window.location.origin}/emergency/${encodeURIComponent(offlinePayload || walletAddress)}`
-      : "";
+  const emergencyUrl = walletAddress ? buildEmergencyUrl(offlinePayload || walletAddress) : "";
   const vCardPayload = useMemo(() => {
     if (!walletAddress || !patientData) return "";
     return buildEmergencyVCard(
