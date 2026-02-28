@@ -670,7 +670,7 @@ export async function revokeRecordAccess(
     recordId: string,
     doctorAddress: string,
     newManifestCid = ''
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; pending?: boolean; error?: string }> {
     if (!HEALTH_REGISTRY) {
         return { success: false, error: 'HealthRegistry contract not configured.' };
     }
@@ -683,14 +683,31 @@ export async function revokeRecordAccess(
     try {
         const contract = getHealthContract(signer);
         const tx = await contract.revokeAccess(recordId, doctorAddress, newManifestCid);
-        const receipt = await tx.wait();
-        const signerAddress = (await signer.getAddress().catch(() => "")).toLowerCase();
+        // Wait for confirmation with a 45s timeout.
+        // On slow testnets (Polygon Amoy) mining can take a long time.
+        // If timed out: tx was submitted — treat as pending success so the UI unblocks.
+        const TX_CONFIRM_TIMEOUT_MS = 45_000;
+        type ReceiptResult =
+            | { ok: true; hash: string }
+            | { ok: false; txHash: string };
+        const result = await Promise.race<ReceiptResult>([
+            tx.wait().then(r => ({ ok: true as const, hash: r!.hash })),
+            new Promise<ReceiptResult>(resolve =>
+                setTimeout(() => resolve({ ok: false, txHash: tx.hash }), TX_CONFIRM_TIMEOUT_MS)
+            ),
+        ]);
+        const signerAddress = (await signer.getAddress().catch(() => '')).toLowerCase();
         if (signerAddress) {
             patientAccessCache.delete(signerAddress);
             patientRecordIdsCache.delete(signerAddress);
         }
         doctorGrantedPatientsCache.delete(doctorAddress.toLowerCase());
-        return { success: true, txHash: receipt.hash };
+        if (!result.ok) {
+            const pendingHash = (result as { ok: false; txHash: string }).txHash;
+            console.warn(`revokeRecordAccess: tx ${pendingHash} submitted but not yet mined (timeout). Will confirm eventually.`);
+            return { success: true, txHash: pendingHash, pending: true };
+        }
+        return { success: true, txHash: (result as { ok: true; hash: string }).hash };
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         const gasMsg = parseInsufficientFundsMessage(msg);

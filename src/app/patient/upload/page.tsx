@@ -77,10 +77,18 @@ export default function PatientUploadPage() {
       const records = await getAccessGrantsForPatient(addr);
       const target = records.filter((g) => g.doctorAddress.toLowerCase() === doctorAddress.toLowerCase());
       for (const grant of target) {
-        const manifest = await fetchJSONFromIPFS(grant.encDekIpfsCid) as { keys?: Record<string, string> };
-        if (!manifest?.keys?.[doctorAddress.toLowerCase()]) continue;
-        const { [doctorAddress.toLowerCase()]: _, ...remaining } = manifest.keys;
-        const newCid = await uploadJSON({ ...manifest, keys: remaining });
+        let newCid = "";
+        try {
+          const manifest = await fetchJSONFromIPFS(grant.encDekIpfsCid) as { keys?: Record<string, string> };
+          const keys = manifest?.keys ?? {};
+          const docKey = doctorAddress.toLowerCase();
+          if (keys[docKey] !== undefined) {
+            const { [docKey]: _removed, ...remaining } = keys;
+            newCid = await uploadJSON({ ...manifest, keys: remaining });
+          }
+        } catch {
+          // IPFS manifest update failed — still proceed with on-chain revoke
+        }
         await revokeRecordAccess(signer, grant.recordId, doctorAddress, newCid);
       }
       await loadAccess();
@@ -156,7 +164,7 @@ export default function PatientUploadPage() {
       <PatientUploadModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        onUploadSuccess={() => {}}
+        onUploadSuccess={() => { }}
       />
     </>
   );

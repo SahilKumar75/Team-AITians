@@ -34,7 +34,15 @@ export default function DoctorPermissionsPage() {
   const [loading, setLoading] = useState(true);
   const [permissions, setPermissions] = useState<GrantEntry[]>([]);
   const [isGrantModalOpen, setIsGrantModalOpen] = useState(false);
+  const [confirmingRevoke, setConfirmingRevoke] = useState<string | null>(null); // doctorAddress
+  const [revoking, setRevoking] = useState<string | null>(null); // doctorAddress
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const loadSeqRef = useRef(0);
+
+  function showToast(type: "success" | "error", message: string) {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -205,8 +213,8 @@ export default function DoctorPermissionsPage() {
             const specialization = !isGenericDoctorText(apiSpecialization)
               ? apiSpecialization
               : !isGenericDoctorText(asNonEmptyString(subDoc?.specialization))
-              ? asNonEmptyString(subDoc?.specialization)
-              : (!isGenericDoctorText(identityTitle) ? identityTitle : fallbackSpecialization);
+                ? asNonEmptyString(subDoc?.specialization)
+                : (!isGenericDoctorText(identityTitle) ? identityTitle : fallbackSpecialization);
 
             return {
               docAddr,
@@ -239,52 +247,85 @@ export default function DoctorPermissionsPage() {
 
   const handleRevoke = async (doctorAddress: string) => {
     const patientAddress = user?.walletAddress;
-    if (!patientAddress || !confirm(tx("Are you sure you want to revoke this doctor's access?"))) return;
+    if (!patientAddress) {
+      showToast("error", tx("Wallet not available. Please log in again."));
+      return;
+    }
 
     const addr = user?.walletAddress ?? session?.user?.walletAddress ?? null;
     if (!addr) return;
 
-    setLoading(true);
+    setConfirmingRevoke(null);
+    setRevoking(doctorAddress);
+    const errors: string[] = [];
     try {
       // 1. Get all grants for this doctor
-      const grants = await getAccessGrantsForPatient(addr);
-      const docGrants = grants.filter(g => g.doctorAddress.toLowerCase() === doctorAddress.toLowerCase());
+      // NOTE: Do NOT use forceRefresh here — it bypasses the Subgraph and goes
+      // directly to the RPC which may be flaky. Subgraph data is reliable for
+      // finding the correct recordIds/encDekCids to use.
+      let grants = await getAccessGrantsForPatient(addr);
+      let docGrants = grants.filter(g => g.doctorAddress.toLowerCase() === doctorAddress.toLowerCase());
 
-      if (docGrants.length > 0) {
-        const provider = new ethers.JsonRpcProvider(
-          process.env.NEXT_PUBLIC_POLYGON_RPC_URL || "https://rpc-amoy.polygon.technology",
-          parseInt(process.env.NEXT_PUBLIC_POLYGON_CHAIN_ID || "80002")
-        );
-        const signer = getSigner(provider);
-        if (!signer) throw new Error(tx("Wallet not available"));
+      // If no grants found in cache/subgraph, try a fresh chain read as last resort
+      if (docGrants.length === 0) {
+        grants = await getAccessGrantsForPatient(addr, { forceRefresh: true });
+        docGrants = grants.filter(g => g.doctorAddress.toLowerCase() === doctorAddress.toLowerCase());
+      }
 
-        for (const grant of docGrants) {
-          // 2. Fetch current manifest
-          const manifest = await fetchJSONFromIPFS(grant.encDekIpfsCid) as any;
+      if (docGrants.length === 0) {
+        showToast("error", tx("No active grants found for this doctor. The list may be stale — please refresh."));
+        return;
+      }
 
-          if (manifest.keys?.[doctorAddress.toLowerCase()]) {
-            // 3. Remove doctor's key from manifest
-            const { [doctorAddress.toLowerCase()]: _, ...remainingKeys } = manifest.keys;
+      const provider = new ethers.JsonRpcProvider(
+        process.env.NEXT_PUBLIC_POLYGON_RPC_URL || "https://rpc-amoy.polygon.technology",
+        parseInt(process.env.NEXT_PUBLIC_POLYGON_CHAIN_ID || "80002")
+      );
+      const signer = getSigner(provider);
+      if (!signer) {
+        showToast("error", tx("Wallet not available"));
+        return;
+      }
+
+      for (const grant of docGrants) {
+        let newCid = "";
+        try {
+          // 2. Try to fetch and update manifest (best-effort — not blocking)
+          const manifest = await fetchJSONFromIPFS(grant.encDekIpfsCid) as Record<string, unknown>;
+          const keys = (manifest?.keys as Record<string, unknown>) ?? {};
+          const docKey = doctorAddress.toLowerCase();
+          if (keys[docKey] !== undefined) {
+            const { [docKey]: _removed, ...remainingKeys } = keys;
             const newManifest = { ...manifest, keys: remainingKeys };
-            const newCid = await uploadJSON(newManifest);
-
-            // 4. Call revoke on-chain
-            const res = await revokeRecordAccess(signer, grant.recordId, doctorAddress, newCid);
-            if (!res.success) {
-              console.warn(`Revoke failed for record ${grant.recordId}:`, res.error);
-            }
+            newCid = await uploadJSON(newManifest);
           }
+        } catch (ipfsErr) {
+          // IPFS manifest update failed — still proceed with on-chain revoke
+          console.warn(`IPFS manifest update failed for record ${grant.recordId}, revoking on-chain anyway:`, ipfsErr);
+        }
+
+        // 3. Always call revoke on-chain regardless of IPFS success
+        const res = await revokeRecordAccess(signer, grant.recordId, doctorAddress, newCid);
+        if (res.success) {
+          // Optimistic UI: remove doctor card immediately
+          setPermissions(prev => prev.filter(p => p.doctorAddress.toLowerCase() !== doctorAddress.toLowerCase()));
+        } else {
+          errors.push(`Record ${grant.recordId.slice(0, 10)}…: ${res.error}`);
+          console.error(`Revoke failed for record ${grant.recordId}:`, res.error);
         }
       }
 
-      await loadPermissions();
-      alert(tx("Access revoked successfully."));
+      if (errors.length > 0) {
+        showToast("error", `${tx("Some revocations failed")}: ${errors.join("; ")}`);
+      } else {
+        showToast("success", tx("Access revoked successfully."));
+      }
     } catch (err) {
       console.error("Revoke failed", err);
-      alert(`${tx("Failed to revoke access")}: ${err instanceof Error ? err.message : String(err)}`);
+      showToast("error", `${tx("Failed to revoke access")}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setLoading(false); // Set loading to false here
-      loadPermissions(true); // Double check with fresh chain read
+      setRevoking(null);
+      loadPermissions(true); // Refresh with force to get updated list
     }
   };
 
@@ -299,6 +340,17 @@ export default function DoctorPermissionsPage() {
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-900">
       <Navbar />
+
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3 transition-all ${toast.type === "success"
+            ? "bg-green-600 text-white"
+            : "bg-red-600 text-white"
+          }`}>
+          {toast.message}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-6 lg:px-8 py-12 pt-24">
         <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -381,14 +433,40 @@ export default function DoctorPermissionsPage() {
                       })}
                     </span>
                   </div>
-                  <button
-                    onClick={() => handleRevoke(grant.doctorAddress)}
-                    className="px-3 py-2 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition inline-flex items-center gap-2"
-                    title={tx("Revoke Access")}
-                  >
-                    <Trash2 className="w-5 h-5" />
-                    {tx("Revoke")}
-                  </button>
+
+                  {/* Revoke: two-step inline confirm */}
+                  {revoking === grant.doctorAddress ? (
+                    <span className="inline-flex items-center gap-2 text-sm text-neutral-500 px-3 py-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {tx("Revoking...")}
+                    </span>
+                  ) : confirmingRevoke === grant.doctorAddress ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="text-xs text-neutral-500">{tx("Sure?")}</span>
+                      <button
+                        onClick={() => handleRevoke(grant.doctorAddress)}
+                        className="px-2 py-1 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded transition"
+                      >
+                        {tx("Yes")}
+                      </button>
+                      <button
+                        onClick={() => setConfirmingRevoke(null)}
+                        className="px-2 py-1 text-xs font-medium bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-200 rounded transition"
+                      >
+                        {tx("No")}
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmingRevoke(grant.doctorAddress)}
+                      disabled={!!revoking}
+                      className="px-3 py-2 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition inline-flex items-center gap-2 disabled:opacity-40"
+                      title={tx("Revoke Access")}
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      {tx("Revoke")}
+                    </button>
+                  )}
                 </div>
                 {grant.txHash && grant.txHash !== "on-chain" && (
                   <p className="text-xs text-neutral-400 mt-2 font-mono truncate">
@@ -404,7 +482,17 @@ export default function DoctorPermissionsPage() {
       <GrantAccessModal
         isOpen={isGrantModalOpen}
         onClose={() => setIsGrantModalOpen(false)}
-        onGrantSuccess={() => loadPermissions()}
+        onGrantSuccess={(grantedEntry) => {
+          if (grantedEntry) {
+            // ✅ Optimistic UI: add the doctor card immediately
+            setPermissions(prev => {
+              const exists = prev.some(p => p.doctorAddress.toLowerCase() === grantedEntry.doctorAddress.toLowerCase());
+              return exists ? prev : [...prev, grantedEntry];
+            });
+          }
+          // Background refresh to sync with chain
+          void loadPermissions(true);
+        }}
       />
     </div>
   );

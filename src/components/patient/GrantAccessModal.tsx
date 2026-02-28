@@ -29,7 +29,7 @@ interface Doctor {
 interface GrantAccessModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onGrantSuccess: () => void;
+    onGrantSuccess: (grantedEntry?: GrantEntry) => void;
 }
 
 export interface GrantEntry {
@@ -131,7 +131,7 @@ export function GrantAccessModal({
     const handleGrant = async (doctor: Doctor) => {
         setGranting(doctor.id);
         setError("");
-        let shouldRefreshPermissions = false;
+        let grantedDoctor: GrantEntry | undefined = undefined;
         const fetchManifestWithTimeout = async (cid: string) =>
             await new Promise<unknown>((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error("Manifest fetch timed out.")), 6000);
@@ -276,7 +276,14 @@ export function GrantAccessModal({
                             return;
                         }
                         setSuccess(`Access granted to ${doctor.name} on-chain.`);
-                        shouldRefreshPermissions = true;
+                        grantedDoctor = {
+                            doctorAddress: doctor.walletAddress,
+                            doctorName: doctor.name ? (doctor.name.match(/^Dr\./i) ? doctor.name : `Dr. ${doctor.name}`) : `Dr. (${doctor.walletAddress.slice(0, 6)}…${doctor.walletAddress.slice(-4)})`,
+                            specialization: doctor.specialization || "General Physician",
+                            hospital: doctor.hospital || "Verified on Chain",
+                            grantedAt: new Date().toISOString(),
+                            txHash: "on-chain",
+                        };
                     }
                 } catch (e: unknown) {
                     const msg = e instanceof Error ? e.message : String(e);
@@ -290,15 +297,13 @@ export function GrantAccessModal({
             }
         } finally {
             setGranting(null);
-            if (shouldRefreshPermissions) {
-                void Promise.resolve(onGrantSuccess());
+            if (grantedDoctor) {
+                void Promise.resolve(onGrantSuccess(grantedDoctor));
             }
             onClose();
             setSuccess("");
             setDoctors([]);
             setQuery("");
-            router.replace("/patient/permissions");
-            router.refresh();
         }
     };
 
@@ -401,11 +406,10 @@ export function GrantAccessModal({
                                 <button
                                     onClick={() => (recordCount === 0 ? handleUploadFirst() : handleGrant(doc))}
                                     disabled={granting === doc.id}
-                                    className={`px-4 py-2 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 ml-4 flex-shrink-0 ${
-                                        recordCount === 0
-                                            ? "bg-amber-600 hover:bg-amber-700"
-                                            : "bg-green-600 hover:bg-green-700"
-                                    }`}
+                                    className={`px-4 py-2 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 ml-4 flex-shrink-0 ${recordCount === 0
+                                        ? "bg-amber-600 hover:bg-amber-700"
+                                        : "bg-green-600 hover:bg-green-700"
+                                        }`}
                                 >
                                     {granting === doc.id ? (
                                         <Loader2 className="w-4 h-4 animate-spin" />
