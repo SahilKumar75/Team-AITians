@@ -149,9 +149,11 @@ export default function PatientEmergencyPage() {
     stableIssuedAt,
   ]);
 
-  // Keep navigation URL stable for NFC/online scanners.
-  // Offline details still stay embedded in the QR via vCard NOTE.
+  // Stable URL for NFC/share/open actions.
   const emergencyUrl = walletAddress ? buildEmergencyUrl(walletAddress) : "";
+  // QR uses encoded Zero-Net payload in URL when available so online scanners
+  // open the responder page directly and page can still decode offline data.
+  const emergencyQrUrl = walletAddress ? buildEmergencyUrl(offlinePayload || walletAddress) : "";
   const vCardPayload = useMemo(() => {
     if (!walletAddress || !patientData) return "";
     return buildEmergencyVCard(
@@ -178,7 +180,7 @@ export default function PatientEmergencyPage() {
     patientData?.emergencyPhone,
     emergencyUrl,
   ]);
-  const qrPayload = vCardPayload || emergencyUrl || offlinePayload || walletAddress;
+  const qrPayload = emergencyQrUrl || vCardPayload || emergencyUrl || offlinePayload || walletAddress;
 
   useEffect(() => {
     if (typeof window === "undefined" || !walletAddress || !offlinePayload) return;
