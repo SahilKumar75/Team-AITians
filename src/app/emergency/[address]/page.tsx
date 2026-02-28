@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Shield, RefreshCw, Volume2, VolumeX, WifiOff, Wifi, Phone, AlertTriangle, MessageCircle } from "lucide-react";
+import { Shield, RefreshCw, Volume2, VolumeX, WifiOff, Wifi, Phone, AlertTriangle } from "lucide-react";
 import OfflineIndicator from "@/components/OfflineIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { withPublicApiBase } from "@/lib/public-api-url";
@@ -111,6 +111,57 @@ function safeDecode(value: string): string {
 
 type DataSource = 'zeronet' | 'server' | 'cache';
 
+function extractZeroNetToken(raw: string): string | null {
+  const value = (raw || "").trim();
+  if (!value) return null;
+  const direct = value.match(/SS1:[A-Za-z0-9\-_]+/);
+  if (direct?.[0]) return direct[0];
+  const onceDecoded = safeDecode(value);
+  const decodedMatch = onceDecoded.match(/SS1:[A-Za-z0-9\-_]+/);
+  if (decodedMatch?.[0]) return decodedMatch[0];
+  return null;
+}
+
+function fromStatusToEmergencyData(
+  _walletAddress: string,
+  statusPayload: Record<string, unknown>
+): PatientEmergencyData {
+  const asText = (value: unknown) => (typeof value === "string" ? value : "");
+  return {
+    name: asText(statusPayload.fullName),
+    dateOfBirth: asText(statusPayload.dateOfBirth),
+    gender: asText(statusPayload.gender),
+    bloodGroup: asText(statusPayload.bloodGroup),
+    phone: asText(statusPayload.phone),
+    email: asText(statusPayload.email),
+    address: asText(statusPayload.address),
+    city: asText(statusPayload.city),
+    state: asText(statusPayload.state),
+    pincode: asText(statusPayload.pincode),
+    emergencyName: asText(statusPayload.emergencyName),
+    emergencyRelation: asText(statusPayload.emergencyRelation),
+    emergencyPhone: asText(statusPayload.emergencyPhone),
+    allergies: asText(statusPayload.allergies),
+    chronicConditions: asText(statusPayload.chronicConditions),
+    currentMedications: asText(statusPayload.currentMedications),
+    previousSurgeries: asText(statusPayload.previousSurgeries),
+    height: asText(statusPayload.height),
+    weight: asText(statusPayload.weight),
+    waistCircumference: asText(statusPayload.waistCircumference),
+    profilePicture: asText(statusPayload.profilePicture) || undefined,
+    privacySettings: {
+      gender: true,
+      phone: false,
+      email: false,
+      address: false,
+      height: false,
+      weight: false,
+      waistCircumference: false,
+      previousSurgeries: false,
+    },
+  };
+}
+
 export default function EmergencyResponderPage({ params }: { params: { address: string } }) {
   const { t, tx, language, setLanguage } = useLanguage();
   const [loading, setLoading] = useState(true);
@@ -122,10 +173,6 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [zeroNetProfile, setZeroNetProfile] = useState<EmergencyProfile | null>(null);
   const [dataAge, setDataAge] = useState<number>(0);
-  const [hospitalName, setHospitalName] = useState("");
-  const [notifySending, setNotifySending] = useState(false);
-  const [notifyDone, setNotifyDone] = useState(false);
-  const [notifyError, setNotifyError] = useState<string | null>(null);
 
   // For static export on IPFS, dynamic paths are resolved via /emergency/placeholder?address=...
   // so prefer query param, then fallback to path param.
@@ -143,17 +190,19 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
   const normalizeEmergencyInput = (raw: string): string => {
     const trimmed = raw.trim();
     if (!trimmed) return "";
+    const extracted = extractZeroNetToken(trimmed);
+    if (extracted) return extracted;
     if (isZeroNetQR(trimmed)) return trimmed;
     try {
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
         const parsed = new URL(trimmed);
         const queryValue = parsed.searchParams.get("address");
         if (queryValue) {
-          return safeDecode(queryValue);
+          return normalizeEmergencyInput(safeDecode(queryValue));
         }
         const parts = parsed.pathname.split("/").filter(Boolean);
         const candidate = parts[parts.length - 1] ? safeDecode(parts[parts.length - 1]) : "";
-        return candidate || trimmed;
+        return candidate ? normalizeEmergencyInput(candidate) : trimmed;
       }
     } catch {
       // Fall through to raw input
@@ -192,15 +241,18 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
     try {
       setLoading(true);
       setError("");
-      const normalizedInput = normalizeEmergencyInput(getActiveEmergencyInput());
+      const activeInput = getActiveEmergencyInput();
+      const fallbackHref = typeof window !== "undefined" ? window.location.href : "";
+      const normalizedInput = normalizeEmergencyInput(activeInput || fallbackHref);
       if (!normalizedInput) {
         setError(tx("Invalid emergency data"));
         return;
       }
 
       // Check if this is Zero-Net QR data (starts with SS1:)
-      if (isZeroNetQR(normalizedInput)) {
-        const decoded = decodeEmergencyProfile(normalizedInput);
+      const zeroNetToken = extractZeroNetToken(normalizedInput) || (isZeroNetQR(normalizedInput) ? normalizedInput : null);
+      if (zeroNetToken) {
+        const decoded = decodeEmergencyProfile(zeroNetToken);
         
         if (decoded) {
           setZeroNetProfile(decoded.profile);
@@ -260,6 +312,30 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       const emergencyApiUrl = withPublicApiBase(`/api/emergency/${encodeURIComponent(walletAddress)}`);
       const response = await fetch(emergencyApiUrl, { cache: "no-store" });
 
+      if (!response.ok && response.status === 404) {
+        const statusUrl = withPublicApiBase(`/api/patient/status?wallet=${encodeURIComponent(walletAddress)}`);
+        const statusResponse = await fetch(statusUrl, { cache: "no-store" });
+        if (statusResponse.ok) {
+          const statusPayload = (await statusResponse.json()) as Record<string, unknown>;
+          const mapped = fromStatusToEmergencyData(walletAddress, statusPayload);
+          const hasAnyEmergencyData = Boolean(
+            statusPayload.isRegisteredOnChain === true ||
+            mapped.name ||
+            mapped.bloodGroup ||
+            mapped.emergencyPhone ||
+            mapped.allergies ||
+            mapped.currentMedications
+          );
+          if (hasAnyEmergencyData) {
+            setPatientData(mapped);
+            setDataSource('server');
+            setError("");
+            saveToCache(walletAddress, mapped);
+            return;
+          }
+        }
+      }
+
       if (!response.ok) {
         let message = tx("Failed to load patient emergency data");
         if (response.status === 404) {
@@ -294,8 +370,26 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       if (response.ok) {
         const data = await response.json();
         setPatientData(data);
-        // Keep zeronet as source but note we have enhanced data
+        // Promote to server mode when online data is available.
+        setDataSource('server');
+        setError("");
         saveToCache(walletAddress, data);
+        return;
+      }
+
+      if (response.status === 404) {
+        const statusUrl = withPublicApiBase(`/api/patient/status?wallet=${encodeURIComponent(walletAddress)}`);
+        const statusResponse = await fetch(statusUrl, { cache: "no-store" });
+        if (statusResponse.ok) {
+          const statusPayload = (await statusResponse.json()) as Record<string, unknown>;
+          const mapped = fromStatusToEmergencyData(walletAddress, statusPayload);
+          if (mapped.name || mapped.bloodGroup || mapped.emergencyPhone || mapped.allergies) {
+            setPatientData(mapped);
+            setDataSource('server');
+            setError("");
+            saveToCache(walletAddress, mapped);
+          }
+        }
       }
     } catch (error) {
       // Silent fail - Zero-Net data is sufficient
@@ -328,39 +422,6 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       
       // Reset speaking state when done (approximate)
       setTimeout(() => setIsSpeaking(false), 15000);
-    }
-  };
-
-  const sendIceSms = async () => {
-    if (!patientData?.emergencyPhone) {
-      setNotifyError(tx("No emergency contact phone on file."));
-      return;
-    }
-    setNotifySending(true);
-    setNotifyError(null);
-    try {
-      const notifyUrl = withPublicApiBase("/api/emergency/notify");
-      const res = await fetch(notifyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientAddress: normalizeEmergencyInput(getActiveEmergencyInput()),
-          hospitalName: hospitalName.trim() || tx("Emergency facility"),
-          tier: "2",
-          emergencyPhone: patientData.emergencyPhone,
-          patientName: patientData.name || tx("Patient"),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setNotifyError(data.error || tx("Failed to send ICE SMS"));
-        return;
-      }
-      setNotifyDone(true);
-    } catch (e) {
-      setNotifyError(e instanceof Error ? e.message : tx("Failed to send"));
-    } finally {
-      setNotifySending(false);
     }
   };
 
@@ -718,39 +779,6 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
                 </p>
               </div>
             </div>
-
-            {/* ICE SMS — Tier 2 / unconscious protocol: notify emergency contact */}
-            {(patientData.emergencyName || patientData.emergencyPhone) && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 rounded-xl p-4 mb-6">
-                <h3 className="font-bold text-amber-900 dark:text-amber-100 mb-2 flex items-center gap-2">
-                  <MessageCircle className="w-5 h-5" /> {tx("Notify emergency contact (ICE SMS)")}
-                </h3>
-                <p className="text-sm text-amber-800 dark:text-amber-200 mb-3">
-                  {tx("Tier 2 / unconscious protocol: send an SMS to the patient's emergency contact that they have been admitted.")}
-                </p>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="flex-1 min-w-[200px]">
-                    <label className="block text-xs font-medium text-amber-800 dark:text-amber-200 mb-1">{tx("Hospital / facility name")}</label>
-                    <input
-                      type="text"
-                      placeholder={tx("e.g. City General ER")}
-                      value={hospitalName}
-                      onChange={(e) => setHospitalName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={sendIceSms}
-                    disabled={notifySending || notifyDone}
-                    className="px-4 py-2 rounded-lg bg-amber-600 text-white font-medium flex items-center gap-2 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {notifySending ? tx("Sending…") : notifyDone ? tx("SMS sent") : tx("Send ICE SMS")}
-                  </button>
-                </div>
-                {notifyError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{notifyError}</p>}
-              </div>
-            )}
 
             {/* Action Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

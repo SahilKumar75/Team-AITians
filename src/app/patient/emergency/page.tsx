@@ -167,8 +167,7 @@ export default function PatientEmergencyPage() {
         emergencyName: patientData.emergencyName,
         emergencyPhone: patientData.emergencyPhone,
         walletAddress,
-      },
-      emergencyUrl
+      }
     );
   }, [
     walletAddress,
@@ -179,9 +178,13 @@ export default function PatientEmergencyPage() {
     patientData?.chronicConditions,
     patientData?.emergencyName,
     patientData?.emergencyPhone,
-    emergencyUrl,
   ]);
-  const qrPayload = emergencyQrUrl || vCardPayload || emergencyUrl || offlinePayload || walletAddress;
+  // Time-critical mode: QR is offline-only.
+  // Keep NFC URL workflow unchanged separately.
+  const qrPayload = useMemo(
+    () => vCardPayload || offlinePayload || walletAddress,
+    [vCardPayload, offlinePayload, walletAddress]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined" || !walletAddress || !offlinePayload) return;
