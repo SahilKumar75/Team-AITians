@@ -17,6 +17,7 @@ import {
   translationCacheKey,
 } from "@/lib/i18n/cache";
 import { isSupportedLanguage, toLocale } from "@/lib/i18n/locale";
+import { withPublicApiBase } from "@/lib/public-api-url";
 
 interface TxOptions {
   sourceLang?: Language;
@@ -83,7 +84,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUserLanguage = useCallback(async () => {
     try {
-      const response = await fetch("/api/user/language");
+      const response = await fetch(withPublicApiBase("/api/user/language"));
       if (response.ok) {
         const data = await response.json();
         if (isSupportedLanguage(data?.language)) {
@@ -164,7 +165,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         try {
-          await fetch("/api/user/language", {
+          await fetch(withPublicApiBase("/api/user/language"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ language: lang }),
@@ -188,7 +189,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
         const texts = items.map((item) => item.maskedText);
         try {
-          const res = await fetch("/api/translate", {
+          const res = await fetch(withPublicApiBase("/api/translate"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

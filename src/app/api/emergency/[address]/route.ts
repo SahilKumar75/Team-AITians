@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
-import { loadProfileFromIdentity, resolveIdentity, asString } from "@/lib/server/identity-profile";
+import {
+  loadProfileFromIdentity,
+  loadProfileFromCid,
+  resolveIdentity,
+  asString,
+} from "@/lib/server/identity-profile";
 
 function toEmergencyData(
   walletAddress: string,
@@ -64,12 +69,19 @@ export async function GET(
     if (!identity || identity.role.toLowerCase() !== "patient") {
       return NextResponse.json({ error: "Patient not found" }, { status: 404 });
     }
-    const { profile } = await loadProfileFromIdentity(identity);
-    if (!profile) {
+    const { profile, lockPayload } = await loadProfileFromIdentity(identity);
+    const lockRecord =
+      lockPayload && typeof lockPayload === "object" ? (lockPayload as Record<string, unknown>) : null;
+    const emergencyRecord = identity.emergencyCid
+      ? await loadProfileFromCid(identity.emergencyCid)
+      : null;
+    const resolvedProfile = profile || lockRecord || emergencyRecord;
+
+    if (!resolvedProfile) {
       return NextResponse.json({ error: "Emergency profile not available" }, { status: 404 });
     }
 
-    const body = toEmergencyData(identity.walletAddress, profile);
+    const body = toEmergencyData(identity.walletAddress, resolvedProfile);
     return NextResponse.json(body, {
       headers: {
         "Cache-Control": "public, max-age=300, stale-while-revalidate=86400",
@@ -82,4 +94,3 @@ export async function GET(
     );
   }
 }
-

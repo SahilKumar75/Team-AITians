@@ -11,6 +11,7 @@ import {
   ArrowRight, MapPin, Upload, Search, ExternalLink
 } from "lucide-react";
 import { getHospitals, getHospitalJourneys } from "@/features/hospital/api";
+import { buildEmergencyPath } from "@/lib/public-app-url";
 
 interface Department {
   id: string;
@@ -323,7 +324,7 @@ export default function HospitalAdminPage() {
                                 Upload records
                               </Link>
                               <Link
-                                href={`/emergency/${patient.walletAddress}`}
+                                href={buildEmergencyPath(patient.walletAddress)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition"

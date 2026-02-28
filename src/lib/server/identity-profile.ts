@@ -6,6 +6,7 @@ import { fetchFromPinataGateway } from "@/lib/pinata-server";
 
 interface IdentityLike {
   lockACid: string;
+  emergencyCid?: string;
   walletAddress: string;
   role: string;
 }
@@ -73,6 +74,7 @@ export async function resolveIdentity(
     return {
       identity: {
         lockACid: byWallet.lockACid,
+        emergencyCid: byWallet.emergencyCid,
         walletAddress: byWallet.walletAddress,
         role: byWallet.role,
       },
@@ -85,11 +87,26 @@ export async function resolveIdentity(
   return {
     identity: {
       lockACid: byIdentifier.lockACid,
+      emergencyCid: byIdentifier.emergencyCid,
       walletAddress: byIdentifier.walletAddress,
       role: byIdentifier.role,
     },
     normalizedIdentifier,
   };
+}
+
+export async function loadProfileFromCid(cid: string): Promise<Record<string, unknown> | null> {
+  const normalized = (cid || "").trim();
+  if (!normalized) return null;
+  try {
+    const profileRaw = await fetchJsonByCidServer(normalized);
+    const envelope = asRecord(profileRaw);
+    if (!envelope) return null;
+    const fromEnvelope = asRecord(envelope.profile);
+    return fromEnvelope ?? envelope;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadProfileFromIdentity(identity: IdentityLike): Promise<{

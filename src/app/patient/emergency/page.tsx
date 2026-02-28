@@ -23,7 +23,8 @@ import {
 } from "lucide-react";
 import { loadUnifiedPatientProfile } from "@/lib/patient-data-source";
 import { buildEmergencyVCard, encodeEmergencyProfileClient } from "@/lib/zero-net-qr-client";
-import { buildEmergencyUrl } from "@/lib/public-app-url";
+import { buildEmergencyPath, buildEmergencyUrl } from "@/lib/public-app-url";
+import { withPublicApiBase } from "@/lib/public-api-url";
 
 interface PatientStatus {
   fullName?: string;
@@ -149,11 +150,11 @@ export default function PatientEmergencyPage() {
     stableIssuedAt,
   ]);
 
-  // Stable URL for NFC/share/open actions.
-  const emergencyUrl = walletAddress ? buildEmergencyUrl(walletAddress) : "";
-  // QR uses encoded Zero-Net payload in URL when available so online scanners
-  // open the responder page directly and page can still decode offline data.
-  const emergencyQrUrl = walletAddress ? buildEmergencyUrl(offlinePayload || walletAddress) : "";
+  // Use Zero-Net payload URL for NFC/share/open actions whenever available.
+  // This guarantees responder data opens even if backend lookup is unavailable.
+  const emergencyUrl = walletAddress ? buildEmergencyUrl(offlinePayload || walletAddress) : "";
+  // Keep explicit QR value for readability; same strategy as NFC URL.
+  const emergencyQrUrl = emergencyUrl;
   const vCardPayload = useMemo(() => {
     if (!walletAddress || !patientData) return "";
     return buildEmergencyVCard(
@@ -187,13 +188,16 @@ export default function PatientEmergencyPage() {
     const seedOffline = async () => {
       try {
         // Warm emergency route and API in browser cache for offline responder PWA mode.
-        await fetch(`/emergency/${encodeURIComponent(offlinePayload)}`, { cache: "reload" }).catch(() => null);
-        await fetch(`/api/emergency/${encodeURIComponent(walletAddress)}`, { cache: "reload" }).catch(() => null);
+        const offlinePath = buildEmergencyPath(offlinePayload);
+        const emergencyApiPath = `/api/emergency/${encodeURIComponent(walletAddress)}`;
+        const emergencyApiUrl = withPublicApiBase(emergencyApiPath);
+        await fetch(offlinePath, { cache: "reload" }).catch(() => null);
+        await fetch(emergencyApiUrl, { cache: "reload" }).catch(() => null);
 
         if ("caches" in window) {
           const c = await caches.open("emergency-prefetch-v1");
-          await c.add(`/emergency/${encodeURIComponent(offlinePayload)}`).catch(() => null);
-          await c.add(`/api/emergency/${encodeURIComponent(walletAddress)}`).catch(() => null);
+          await c.add(offlinePath).catch(() => null);
+          await c.add(emergencyApiUrl).catch(() => null);
         }
         setOfflineReady(true);
       } catch {

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Shield, QrCode, ArrowRight } from "lucide-react";
+import { buildEmergencyPath } from "@/lib/public-app-url";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /**
  * Tier 0 public landing: no login required.
@@ -11,6 +13,7 @@ import { Shield, QrCode, ArrowRight } from "lucide-react";
  */
 export default function EmergencyLandingPage() {
   const router = useRouter();
+  const { tx } = useLanguage();
   const [urlInput, setUrlInput] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -22,10 +25,22 @@ export default function EmergencyLandingPage() {
     try {
       if (trimmed.startsWith("http")) {
         const u = new URL(trimmed);
-        path = u.pathname.replace(/^\/+/, ""); // e.g. "emergency/0x..."
-        const parts = path.split("/");
-        if (parts[0] === "emergency" && parts[1]) path = parts[1];
-        else if (parts[0]) path = parts[0];
+        const queryAddress = u.searchParams.get("address");
+        if (queryAddress) {
+          path = decodeURIComponent(queryAddress);
+        } else {
+          path = u.pathname.replace(/^\/+/, ""); // e.g. "emergency/0x..."
+          const parts = path.split("/");
+          if (parts[0] === "emergency" && parts[1]) path = parts[1];
+          else if (parts[0]) path = parts[0];
+        }
+      } else if (trimmed.includes("?address=")) {
+        const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+        const u = new URL(normalized, "https://placeholder.local");
+        const queryAddress = u.searchParams.get("address");
+        if (queryAddress) {
+          path = decodeURIComponent(queryAddress);
+        }
       } else if (trimmed.includes("/")) {
         const parts = trimmed.split("/").filter(Boolean);
         path = parts[parts.length - 1] || trimmed;
@@ -33,7 +48,7 @@ export default function EmergencyLandingPage() {
     } catch {
       path = trimmed;
     }
-    if (path) router.push(`/emergency/${encodeURIComponent(path)}`);
+    if (path) router.push(buildEmergencyPath(path));
   };
 
   return (
@@ -69,7 +84,7 @@ export default function EmergencyLandingPage() {
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="e.g. https://yoursite.com/emergency/0x... or paste full URL"
+              placeholder={tx("Paste emergency URL or patient ID")}
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               className="flex-1 px-4 py-3 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-500 focus:ring-2 focus:ring-red-500 outline-none"

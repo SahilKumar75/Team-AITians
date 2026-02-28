@@ -38,6 +38,10 @@ export function getPublicBaseUrl(): string {
   return DEFAULT_PUBLIC_BASE_URL;
 }
 
+export function buildEmergencyPath(id: string): string {
+  return `/emergency/placeholder?address=${encodeURIComponent(id)}`;
+}
+
 export function buildEmergencyUrl(id: string): string {
-  return `${getPublicBaseUrl()}/emergency/${encodeURIComponent(id)}`;
+  return `${getPublicBaseUrl()}${buildEmergencyPath(id)}`;
 }

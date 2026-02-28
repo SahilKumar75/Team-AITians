@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Shield, RefreshCw, Volume2, VolumeX, WifiOff, Wifi, Phone, AlertTriangle, MessageCircle } from "lucide-react";
 import OfflineIndicator from "@/components/OfflineIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withPublicApiBase } from "@/lib/public-api-url";
 import { 
   isZeroNetQR, 
   decodeEmergencyProfile, 
@@ -100,27 +101,44 @@ function formatCacheAge(ageMs: number): string {
   return 'just now';
 }
 
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 type DataSource = 'zeronet' | 'server' | 'cache';
 
 export default function EmergencyResponderPage({ params }: { params: { address: string } }) {
-  const { t, tx } = useLanguage();
+  const { t, tx, language, setLanguage } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [patientData, setPatientData] = useState<PatientEmergencyData | null>(null);
   const [error, setError] = useState<string>("");
   const [isOnline, setIsOnline] = useState(true);
-  const [dataSource, setDataSource] = useState<DataSource>('server');
+  const [dataSource, setDataSource] = useState<DataSource>('cache');
   const [cacheAge, setCacheAge] = useState<number | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [zeroNetProfile, setZeroNetProfile] = useState<EmergencyProfile | null>(null);
   const [dataAge, setDataAge] = useState<number>(0);
-  const [language, setLanguage] = useState<'en' | 'hi' | 'mr'>('hi');
   const [hospitalName, setHospitalName] = useState("");
   const [notifySending, setNotifySending] = useState(false);
   const [notifyDone, setNotifyDone] = useState(false);
   const [notifyError, setNotifyError] = useState<string | null>(null);
 
-  // Decode the address parameter (might be URL-encoded Zero-Net data)
-  const decodedAddress = decodeURIComponent(params.address);
+  // For static export on IPFS, dynamic paths are resolved via /emergency/placeholder?address=...
+  // so prefer query param, then fallback to path param.
+  const routeAddress = safeDecode(params.address || "");
+
+  const getActiveEmergencyInput = (): string => {
+    const queryAddress =
+      typeof window !== "undefined"
+        ? safeDecode(new URLSearchParams(window.location.search).get("address") || "")
+        : "";
+    const candidate = queryAddress || routeAddress;
+    return candidate === "placeholder" ? "" : candidate;
+  };
 
   const normalizeEmergencyInput = (raw: string): string => {
     const trimmed = raw.trim();
@@ -129,8 +147,12 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
     try {
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
         const parsed = new URL(trimmed);
+        const queryValue = parsed.searchParams.get("address");
+        if (queryValue) {
+          return safeDecode(queryValue);
+        }
         const parts = parsed.pathname.split("/").filter(Boolean);
-        const candidate = parts[parts.length - 1] ? decodeURIComponent(parts[parts.length - 1]) : "";
+        const candidate = parts[parts.length - 1] ? safeDecode(parts[parts.length - 1]) : "";
         return candidate || trimmed;
       }
     } catch {
@@ -164,13 +186,13 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
 
   useEffect(() => {
     loadEmergencyData();
-  }, [decodedAddress]);
+  }, [routeAddress]);
 
   async function loadEmergencyData() {
     try {
       setLoading(true);
       setError("");
-      const normalizedInput = normalizeEmergencyInput(decodedAddress);
+      const normalizedInput = normalizeEmergencyInput(getActiveEmergencyInput());
       if (!normalizedInput) {
         setError(tx("Invalid emergency data"));
         return;
@@ -227,7 +249,7 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       
     } catch (error) {
       console.error("Error loading emergency data:", error);
-      handleFetchError();
+      handleFetchError(getActiveEmergencyInput(), tx("No data available. Please connect to internet."));
     } finally {
       setLoading(false);
     }
@@ -235,15 +257,20 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
 
   async function fetchFromServer(walletAddress: string) {
     try {
-      const response = await fetch(`/api/emergency/${walletAddress}`);
+      const emergencyApiUrl = withPublicApiBase(`/api/emergency/${encodeURIComponent(walletAddress)}`);
+      const response = await fetch(emergencyApiUrl, { cache: "no-store" });
 
       if (!response.ok) {
+        let message = tx("Failed to load patient emergency data");
         if (response.status === 404) {
-          setError(tx("Patient not found or not registered"));
+          message = tx("Patient not found or not registered");
+        } else if (response.status >= 500) {
+          message = `${tx("Backend server error")} (${response.status})`;
         } else {
-          setError(tx("Failed to load patient emergency data"));
+          message = `${tx("Failed to load patient emergency data")} (${response.status})`;
         }
-        handleFetchError();
+        setError(message);
+        handleFetchError(walletAddress, message);
         return;
       }
 
@@ -256,13 +283,14 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       
     } catch (error) {
       console.error("Fetch error:", error);
-      handleFetchError();
+      handleFetchError(walletAddress, tx("No data available. Please connect to internet."));
     }
   }
 
   async function fetchEnhancedData(walletAddress: string) {
     try {
-      const response = await fetch(`/api/emergency/${walletAddress}`);
+      const emergencyApiUrl = withPublicApiBase(`/api/emergency/${encodeURIComponent(walletAddress)}`);
+      const response = await fetch(emergencyApiUrl, { cache: "no-store" });
       if (response.ok) {
         const data = await response.json();
         setPatientData(data);
@@ -275,16 +303,17 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
     }
   }
 
-  function handleFetchError() {
+  function handleFetchError(rawInput?: string, fallbackMessage?: string) {
     // Try cache fallback
-    const cached = loadFromCache(normalizeEmergencyInput(decodedAddress));
+    const normalizedInput = normalizeEmergencyInput(rawInput || getActiveEmergencyInput());
+    const cached = loadFromCache(normalizedInput);
     if (cached) {
       setPatientData(cached);
       setDataSource('cache');
-      setCacheAge(getCacheAge(decodedAddress));
+      setCacheAge(getCacheAge(normalizedInput));
       setError("");
-    } else if (!patientData) {
-      setError(tx("No data available. Please connect to internet."));
+    } else if (!patientData && fallbackMessage) {
+      setError(fallbackMessage);
     }
   }
 
@@ -293,7 +322,8 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
       stopSpeaking();
       setIsSpeaking(false);
     } else if (zeroNetProfile) {
-      speakEmergencyProfile(zeroNetProfile, language);
+      const speechLanguage = language === "bh" ? "hi" : language;
+      speakEmergencyProfile(zeroNetProfile, speechLanguage);
       setIsSpeaking(true);
       
       // Reset speaking state when done (approximate)
@@ -309,11 +339,12 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
     setNotifySending(true);
     setNotifyError(null);
     try {
-      const res = await fetch("/api/emergency/notify", {
+      const notifyUrl = withPublicApiBase("/api/emergency/notify");
+      const res = await fetch(notifyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientAddress: decodedAddress,
+          patientAddress: normalizeEmergencyInput(getActiveEmergencyInput()),
           hospitalName: hospitalName.trim() || tx("Emergency facility"),
           tier: "2",
           emergencyPhone: patientData.emergencyPhone,
@@ -374,6 +405,21 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
             </div>
             <div className="flex items-center gap-4">
               <OfflineIndicator />
+              <div className="hidden sm:flex items-center gap-1 rounded-full border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1">
+                {(["en", "hi", "mr", "bh"] as const).map((lang) => (
+                  <button
+                    key={lang}
+                    onClick={() => setLanguage(lang)}
+                    className={`px-2 py-1 text-xs rounded-full transition ${
+                      language === lang
+                        ? "bg-blue-600 text-white"
+                        : "text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    }`}
+                  >
+                    {lang.toUpperCase()}
+                  </button>
+                ))}
+              </div>
               <Link href="/" className="text-sm text-gray-600 hover:text-gray-900 dark:text-neutral-400 dark:hover:text-neutral-100">
                 {t.emergency.backToHome}
               </Link>
@@ -415,20 +461,20 @@ export default function EmergencyResponderPage({ params }: { params: { address: 
             {/* Language Selector for Voice */}
             <div className="mt-3 flex items-center gap-2">
               <span className="text-sm">{tx("Voice Language")}:</span>
-              {(['hi', 'en', 'mr'] as const).map((lang) => (
-                <button
-                  key={lang}
-                  onClick={() => setLanguage(lang)}
+                  {(["hi", "en", "mr", "bh"] as const).map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => setLanguage(lang)}
                   className={`px-3 py-1 text-sm rounded-full transition ${
                     language === lang
                       ? 'bg-blue-600 text-white'
                       : 'bg-white/50 hover:bg-white/80'
                   }`}
-                >
-                  {lang === 'hi' ? 'हिंदी' : lang === 'mr' ? 'मराठी' : 'English'}
-                </button>
-              ))}
-            </div>
+                    >
+                      {lang === "hi" ? "हिंदी" : lang === "mr" ? "मराठी" : lang === "bh" ? "भोजपुरी" : "English"}
+                    </button>
+                  ))}
+                </div>
           </div>
         )}
 
